@@ -1,0 +1,6 @@
+<?php
+
+declare(strict_types=1);
+use Tsitsishvili\Documentator\Tests\TestCase;
+
+uses(TestCase::class)->in(__DIR__);

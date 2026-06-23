@@ -1,0 +1,127 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Acme Storefront API",
+    "version": "2.4.0",
+    "description": "A sample document for previewing the built-in explorer."
+  },
+  "servers": [
+    { "url": "https://api.acme.test", "description": "Production" },
+    { "url": "http://localhost", "description": "Local" }
+  ],
+  "tags": [
+    { "name": "Orders" },
+    { "name": "Customers" }
+  ],
+  "components": {
+    "securitySchemes": {
+      "default": { "type": "http", "scheme": "bearer", "description": "API token" }
+    }
+  },
+  "paths": {
+    "/api/orders": {
+      "get": {
+        "operationId": "ordersIndex",
+        "tags": ["Orders"],
+        "summary": "List orders",
+        "description": "Returns a **paginated** list of the authenticated customer's orders.\n\nFilter with these query parameters:\n\n- `status` — restrict by order status\n- `limit` — page size (max `100`)\n\nSee the [API guide](https://docs.acme.test) for pagination details.",
+        "parameters": [
+          { "name": "status", "in": "query", "required": false, "schema": { "type": "string", "enum": ["paid", "pending", "refunded"] }, "description": "Filter by `status`." },
+          { "name": "limit", "in": "query", "required": false, "schema": { "type": "integer", "example": 25 } }
+        ],
+        "security": [{ "default": [] }],
+        "responses": {
+          "200": { "description": "A page of orders" }
+        }
+      },
+      "post": {
+        "operationId": "ordersStore",
+        "tags": ["Orders"],
+        "summary": "Create an order",
+        "description": "Creates an order for the authenticated customer.",
+        "security": [{ "default": [] }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["items"],
+                "properties": {
+                  "coupon": { "type": "string", "description": "Optional promo code." },
+                  "items": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "sku": { "type": "string" },
+                        "quantity": { "type": "integer", "example": 1 }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": { "description": "Order created", "content": { "application/json": { "schema": { "type": "object", "properties": { "id": { "type": "integer" }, "reference": { "type": "string" } } } } } },
+          "422": { "description": "Validation failed" }
+        }
+      }
+    },
+    "/api/orders/{order}": {
+      "get": {
+        "operationId": "ordersShow",
+        "tags": ["Orders"],
+        "summary": "Get an order",
+        "parameters": [
+          { "name": "order", "in": "path", "required": true, "schema": { "type": "integer" } }
+        ],
+        "security": [{ "default": [] }],
+        "responses": {
+          "200": {
+            "description": "The order",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "id": { "type": "integer" },
+                    "reference": { "type": "string" },
+                    "paid": { "type": "boolean" },
+                    "created_at": { "type": "string", "format": "date-time" },
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "sku": { "type": "string" },
+                          "quantity": { "type": "integer" }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": { "description": "Order not found" }
+        }
+      }
+    },
+    "/api/customers/{customer}": {
+      "get": {
+        "operationId": "customersShow",
+        "tags": ["Customers"],
+        "summary": "Get a customer",
+        "parameters": [
+          { "name": "customer", "in": "path", "required": true, "schema": { "type": "integer" } }
+        ],
+        "responses": {
+          "200": { "description": "The customer" }
+        }
+      }
+    }
+  }
+}

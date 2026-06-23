@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="light dark">
+    <title>Documentator — preview</title>
+    <!-- Dev-only harness: lets you see the built-in UI without a host Laravel app.
+         Serve the package root over HTTP (so fetch works) and open this file:
+            php -S localhost:8123 -t .
+            open http://localhost:8123/dev/preview.html -->
+    <link rel="stylesheet" href="../resources/ui/app.css">
+</head>
+<body>
+    <div id="app" data-state="loading">
+        <div class="boot">
+            <span class="boot__mark">{ }</span>
+            <p class="boot__msg">Loading the API&hellip;</p>
+        </div>
+    </div>
+
+    <script>
+        window.__DOCUMENTATOR__ = {
+            specUrl: './sample-openapi.json',
+            title: 'Acme Storefront API',
+        };
+    </script>
+    <script src="../resources/ui/app.js" defer></script>
+</body>
+</html>
