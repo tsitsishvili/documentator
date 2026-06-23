@@ -7,7 +7,6 @@ namespace Tsitsishvili\Documentator\OpenApi;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Resources\Json\JsonResource;
 use Illuminate\Http\Resources\Json\ResourceCollection;
-use Tsitsishvili\Documentator\Attributes\UsesModel;
 use PhpParser\Node;
 use PhpParser\Node\Expr\Cast;
 use PhpParser\Node\Scalar;
@@ -19,6 +18,7 @@ use PhpParser\ParserFactory;
 use ReflectionClass;
 use ReflectionMethod;
 use Throwable;
+use Tsitsishvili\Documentator\Attributes\UsesModel;
 
 /**
  * Recovers an OpenAPI object schema from an API Resource by statically parsing

@@ -6,9 +6,9 @@ namespace Tsitsishvili\Documentator\Extraction;
 
 use Closure;
 use Illuminate\Routing\Route;
-use Tsitsishvili\Documentator\Data\EndpointData;
 use ReflectionMethod;
 use Throwable;
+use Tsitsishvili\Documentator\Data\EndpointData;
 
 /**
  * Runs a route through the ordered list of extraction strategies, producing a

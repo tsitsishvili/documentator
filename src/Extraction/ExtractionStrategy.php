@@ -5,8 +5,8 @@ declare(strict_types=1);
 namespace Tsitsishvili\Documentator\Extraction;
 
 use Illuminate\Routing\Route;
-use Tsitsishvili\Documentator\Data\EndpointData;
 use ReflectionMethod;
+use Tsitsishvili\Documentator\Data\EndpointData;
 
 /**
  * One step of the extraction pipeline. Each strategy receives the accumulated

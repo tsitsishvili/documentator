@@ -4,8 +4,8 @@ declare(strict_types=1);
 
 namespace Tsitsishvili\Documentator\Tests;
 
-use Tsitsishvili\Documentator\DocumentatorServiceProvider;
 use Orchestra\Testbench\TestCase as Orchestra;
+use Tsitsishvili\Documentator\DocumentatorServiceProvider;
 
 abstract class TestCase extends Orchestra
 {

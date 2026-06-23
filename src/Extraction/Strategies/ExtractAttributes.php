@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace Tsitsishvili\Documentator\Extraction\Strategies;
 
 use Illuminate\Routing\Route;
+use ReflectionClass;
+use ReflectionMethod;
 use Tsitsishvili\Documentator\Attributes\Authenticated;
 use Tsitsishvili\Documentator\Attributes\BodyParam;
 use Tsitsishvili\Documentator\Attributes\Deprecated;
@@ -21,8 +23,6 @@ use Tsitsishvili\Documentator\Data\ResponseData;
 use Tsitsishvili\Documentator\Extraction\ExtractionStrategy;
 use Tsitsishvili\Documentator\OpenApi\PaginationSchema;
 use Tsitsishvili\Documentator\OpenApi\ResourceSchemaExtractor;
-use ReflectionClass;
-use ReflectionMethod;
 
 /**
  * Applies explicit PHP attribute overrides. Runs LAST in the pipeline, so any

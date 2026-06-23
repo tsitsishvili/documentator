@@ -6,10 +6,10 @@ namespace Tsitsishvili\Documentator\Extraction\Strategies;
 
 use Illuminate\Routing\Route;
 use Illuminate\Support\Str;
+use ReflectionMethod;
 use Tsitsishvili\Documentator\Data\EndpointData;
 use Tsitsishvili\Documentator\Data\ParameterData;
 use Tsitsishvili\Documentator\Extraction\ExtractionStrategy;
-use ReflectionMethod;
 
 /**
  * Seeds the endpoint from the route itself: verbs, URI, name, controller, path

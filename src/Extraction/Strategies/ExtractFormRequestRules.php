@@ -6,12 +6,12 @@ namespace Tsitsishvili\Documentator\Extraction\Strategies;
 
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Routing\Route;
-use Tsitsishvili\Documentator\Data\EndpointData;
-use Tsitsishvili\Documentator\Extraction\ExtractionStrategy;
-use Tsitsishvili\Documentator\Extraction\Support\RuleParser;
 use ReflectionMethod;
 use ReflectionNamedType;
 use Throwable;
+use Tsitsishvili\Documentator\Data\EndpointData;
+use Tsitsishvili\Documentator\Extraction\ExtractionStrategy;
+use Tsitsishvili\Documentator\Extraction\Support\RuleParser;
 
 /**
  * Infers body parameters from a FormRequest type-hinted in the controller

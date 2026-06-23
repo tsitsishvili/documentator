@@ -7,15 +7,15 @@ namespace Tsitsishvili\Documentator\Extraction\Strategies;
 use Illuminate\Http\Resources\Json\JsonResource;
 use Illuminate\Http\Resources\Json\ResourceCollection;
 use Illuminate\Routing\Route;
+use ReflectionClass;
+use ReflectionMethod;
+use ReflectionNamedType;
+use Throwable;
 use Tsitsishvili\Documentator\Data\EndpointData;
 use Tsitsishvili\Documentator\Data\ResponseData;
 use Tsitsishvili\Documentator\Extraction\ExtractionStrategy;
 use Tsitsishvili\Documentator\OpenApi\PaginationSchema;
 use Tsitsishvili\Documentator\OpenApi\ResourceSchemaExtractor;
-use ReflectionClass;
-use ReflectionMethod;
-use ReflectionNamedType;
-use Throwable;
 
 /**
  * Infers a success response from the controller's return type when it is an
