@@ -101,7 +101,18 @@ Cross-origin "try it" calls require the API to allow CORS from the docs origin.
 
 The docs are open everywhere except production by default; in production set
 `DOCUMENTATOR_ENABLED=true` (and/or add auth via `route.middleware`) to expose
-them. Building the document scans routes per request, so pre-build it:
+them. To restrict *who* may view the docs, register an authorization gate from
+a service provider's `boot()` — it runs after the route middleware, so the
+authenticated user is available:
+
+```php
+use Tsitsishvili\Documentator\Documentator;
+
+Documentator::auth(fn ($request) => $request->user()?->is_admin);
+```
+
+Returning `false` aborts with a 403. Building the document scans routes per
+request, so pre-build it:
 
 ```bash
 php artisan documentator:generate                  # warm the cache (set DOCUMENTATOR_CACHE=true)
@@ -113,7 +124,7 @@ php artisan documentator:postman collection.json    # export a Postman v2.1 coll
 
 Key options in `config/documentator.php`:
 
-- `enabled` — docs access; `null` = open except in production, or force `true`/`false`.
+- `enabled` — docs access; `null` = open except in production, or force `true`/`false`. Restrict *who* may view with `Documentator::auth()`.
 - `routes.match` / `routes.exclude` — which routes are documented.
 - `route.prefix` / `route.middleware` / `route.domain` — where the UI is served. Lock it down for private APIs.
 - `title` / `version` / `description` / `servers` — OpenAPI `info` and server list.

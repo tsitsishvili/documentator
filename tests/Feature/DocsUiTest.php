@@ -2,6 +2,13 @@
 
 declare(strict_types=1);
 
+use Tsitsishvili\Documentator\Documentator;
+
+afterEach(function () {
+    // The auth gate is static state; reset it so it can't leak between tests.
+    Documentator::auth(fn () => true);
+});
+
 it('serves the built-in explorer shell by default', function () {
     $response = $this->get('/docs');
 
@@ -33,4 +40,18 @@ it('embeds Scalar when the driver is switched', function () {
 
     $response->assertOk();
     expect($response->getContent())->toContain('id="api-reference"');
+});
+
+it('forbids docs access when the auth gate denies it', function () {
+    Documentator::auth(fn () => false);
+
+    $this->get('/docs')->assertForbidden();
+    $this->get('/docs/openapi.json')->assertForbidden();
+});
+
+it('passes the request to the auth gate', function () {
+    Documentator::auth(fn ($request) => $request->query('token') === 'secret');
+
+    $this->get('/docs')->assertForbidden();
+    $this->get('/docs?token=secret')->assertOk();
 });

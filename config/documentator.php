@@ -25,7 +25,10 @@ return [
     |
     | Whether the docs routes are reachable. Leave null to open them everywhere
     | except production; set true/false to force it. Combine with route
-    | middleware below to put the docs behind auth.
+    | middleware below to put the docs behind auth. To restrict *who* may view
+    | them, register a gate with Documentator::auth() from a service provider:
+    |
+    |     Documentator::auth(fn ($request) => $request->user()?->is_admin);
     |
     */
 

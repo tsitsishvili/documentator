@@ -18,6 +18,7 @@ use Tsitsishvili\Documentator\Extraction\Strategies\ExtractRouteMetadata;
 use Tsitsishvili\Documentator\Http\Controllers\AssetController;
 use Tsitsishvili\Documentator\Http\Controllers\DocsController;
 use Tsitsishvili\Documentator\Http\Controllers\OpenApiController;
+use Tsitsishvili\Documentator\Http\Middleware\Authorize;
 use Tsitsishvili\Documentator\Http\Middleware\EnsureDocsEnabled;
 use Tsitsishvili\Documentator\OpenApi\OpenApiGenerator;
 
@@ -78,7 +79,14 @@ final class DocumentatorServiceProvider extends ServiceProvider
         $router->group([
             'prefix' => config('documentator.route.prefix', 'docs'),
             'domain' => config('documentator.route.domain'),
-            'middleware' => array_merge([EnsureDocsEnabled::class], (array) config('documentator.route.middleware', ['web'])),
+            // EnsureDocsEnabled gates existence (cheap, no user needed); the host
+            // app's middleware (e.g. "web") resolves the session/user; Authorize
+            // runs last so its callback can read $request->user().
+            'middleware' => array_merge(
+                [EnsureDocsEnabled::class],
+                (array) config('documentator.route.middleware', ['web']),
+                [Authorize::class],
+            ),
         ], function (Router $router) {
             $router->get('/', [DocsController::class, 'index'])->name('documentator.ui');
             $router->get('/openapi.json', [OpenApiController::class, 'show'])->name('documentator.openapi');
