@@ -24,6 +24,7 @@ final class OpenApiGenerator
     {
         $paths = [];
         $tags = [];
+        $globalScheme = $this->defaultSecurityScheme();
 
         foreach ($endpoints as $endpoint) {
             $path = $this->normalizePath($endpoint->uri);
@@ -31,7 +32,7 @@ final class OpenApiGenerator
             $tags[$tag] = true;
 
             foreach ($endpoint->verbs() as $verb) {
-                $paths[$path][$verb] = $this->operation($endpoint, $tag);
+                $paths[$path][$verb] = $this->operation($endpoint, $tag, $globalScheme);
             }
         }
 
@@ -39,12 +40,30 @@ final class OpenApiGenerator
             'openapi' => '3.1.0',
             'info' => $this->info(),
             'servers' => config('documentator.servers', []),
+            'security' => $globalScheme !== null ? [[$globalScheme => []]] : [],
             'tags' => array_map(fn (string $name) => ['name' => $name], array_keys($tags)),
             'paths' => $paths,
             'components' => [
                 'securitySchemes' => (object) config('documentator.security', []),
             ],
         ]);
+    }
+
+    /**
+     * The security scheme applied to every operation by default (emitted as the
+     * document's root `security`), or null when the API isn't globally
+     * authenticated. config('documentator.authenticate') may be true (use the
+     * "default" scheme) or the name of a scheme declared in `security`.
+     */
+    private function defaultSecurityScheme(): ?string
+    {
+        $value = config('documentator.authenticate', false);
+
+        if ($value === false || $value === null || $value === '') {
+            return null;
+        }
+
+        return $value === true ? 'default' : (string) $value;
     }
 
     /**
@@ -62,7 +81,7 @@ final class OpenApiGenerator
     /**
      * @return array<string, mixed>
      */
-    private function operation(EndpointData $endpoint, string $tag): array
+    private function operation(EndpointData $endpoint, string $tag, ?string $globalScheme = null): array
     {
         $operation = array_filter([
             'operationId' => $endpoint->operationId(),
@@ -77,6 +96,11 @@ final class OpenApiGenerator
 
         if ($endpoint->authenticated) {
             $operation['security'] = [[$endpoint->securityScheme ?? 'default' => []]];
+        } elseif ($globalScheme !== null) {
+            // A global security requirement is in force; this operation isn't
+            // authenticated, so opt it out with an empty requirement to keep it
+            // public (overriding the document's root `security`).
+            $operation['security'] = [];
         }
 
         return $operation;

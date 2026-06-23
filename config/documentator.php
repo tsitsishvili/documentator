@@ -136,6 +136,22 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Global authentication
+    |--------------------------------------------------------------------------
+    |
+    | Require a security scheme across the whole API instead of marking each
+    | endpoint. Emitted as the document's top-level `security`, which applies to
+    | every operation. Set true to require the "default" scheme, or name another
+    | scheme from `security` above. Endpoints that aren't authenticated (no
+    | `auth` middleware / #[Authenticated]) opt out automatically and stay
+    | public. Leave false to declare auth per-endpoint.
+    |
+    */
+
+    'authenticate' => env('DOCUMENTATOR_AUTHENTICATE', false),
+
+    /*
+    |--------------------------------------------------------------------------
     | Spec caching
     |--------------------------------------------------------------------------
     |

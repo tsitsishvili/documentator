@@ -89,6 +89,11 @@ Auth schemes are declared in `config('documentator.security')` as OpenAPI
 automatically; use `#[Authenticated('scheme-key')]` to be explicit or pick a
 non-default scheme. The UI renders the matching authorize / token input.
 
+To require auth across the whole API instead of marking each endpoint, set
+`documentator.authenticate` to `true` (or a scheme name) — it emits a top-level
+`security` requirement applied to every operation. Endpoints that aren't
+authenticated opt out automatically and stay public.
+
 ## Trying requests
 
 The built-in explorer can call your API live. It remembers the auth token and
@@ -129,6 +134,7 @@ Key options in `config/documentator.php`:
 - `route.prefix` / `route.middleware` / `route.domain` — where the UI is served. Lock it down for private APIs.
 - `title` / `version` / `description` / `servers` — OpenAPI `info` and server list.
 - `security` — auth schemes.
+- `authenticate` — require a scheme API-wide (`true` = the `default` scheme, or a scheme name); `false` = per-endpoint.
 - `models_namespace` — where Resources' wrapped models live (for cast-based typing).
 - `ui.driver` — `documentator` (built-in explorer, default) or `scalar`.
 - `ui.assets` — Scalar bundle URL when `ui.driver = scalar` (pinned; self-host for SRI/CSP).
