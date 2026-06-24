@@ -232,7 +232,7 @@
             if (t.dataset.kind === 'auth') store.set('auth', t.value);
             if (t.dataset.kind === 'server') store.set('server', t.value);
         }
-        updateCurl();
+        updateSnippet();
     }
 
     function onKeydown(e) {
@@ -430,12 +430,21 @@
             html += '<div class="field"><textarea class="textarea" data-kind="body" spellcheck="false">' + esc(skeleton) + '</textarea></div>';
         }
 
-        html += '<div class="curl"><div class="curl__bar">cURL<button class="curl__copy" id="curlCopy" type="button">Copy</button></div>' +
-            '<pre class="curl__code" id="curlCode"></pre></div>';
+        var active = activeLang();
+        var tabs = LANG_ORDER.map(function (lang) {
+            var on = lang === active;
+            return '<button class="snippet__lang' + (on ? ' is-active' : '') + '" type="button" data-lang="' + lang +
+                '" aria-pressed="' + (on ? 'true' : 'false') + '">' + esc(GENERATORS[lang].label) + '</button>';
+        }).join('');
+        html += '<div class="snippet">' +
+            '<div class="snippet__bar"><div class="snippet__langs" id="snippetLangs">' + tabs + '</div>' +
+            '<button class="snippet__copy" id="snippetCopy" type="button">Copy</button></div>' +
+            '<pre class="snippet__code" id="snippetCode"></pre></div>';
 
         form.innerHTML = html;
-        document.getElementById('curlCopy').addEventListener('click', copyCurl);
-        updateCurl();
+        document.getElementById('snippetCopy').addEventListener('click', copySnippet);
+        document.getElementById('snippetLangs').addEventListener('click', onLangClick);
+        updateSnippet();
     }
 
     function readForm() {
@@ -472,6 +481,53 @@
         return { method: entry.method, url: url, headers: headers, body: bodyInput ? bodyInput.value : null };
     }
 
+    /* req.body is a JSON string; return the parsed value, the raw string when it
+       isn't JSON, or undefined when there's no body. */
+    function parsedBody(req) {
+        if (!req.body) return undefined;
+        try { return JSON.parse(req.body); } catch (e) { return req.body; }
+    }
+
+    /* Indent every line after the first (a literal block sits inside a call). */
+    function indentLines(text, prefix) {
+        return text.split('\n').map(function (line, i) { return i === 0 ? line : prefix + line; }).join('\n');
+    }
+    function pad(depth) { var s = ''; while (depth-- > 0) s += '  '; return s; }
+
+    /* Render a value as a PHP array / Python literal (2 spaces per level). */
+    function toPhp(value, depth) {
+        depth = depth || 1;
+        if (value === null) return 'null';
+        if (typeof value === 'boolean') return value ? 'true' : 'false';
+        if (typeof value === 'number') return String(value);
+        if (typeof value === 'string') return "'" + value.replace(/\\/g, '\\\\').replace(/'/g, "\\'") + "'";
+        if (Array.isArray(value)) {
+            if (!value.length) return '[]';
+            return '[\n' + value.map(function (v) { return pad(depth) + toPhp(v, depth + 1) + ','; }).join('\n') + '\n' + pad(depth - 1) + ']';
+        }
+        var keys = Object.keys(value);
+        if (!keys.length) return '[]';
+        return '[\n' + keys.map(function (k) {
+            return pad(depth) + "'" + k.replace(/'/g, "\\'") + "' => " + toPhp(value[k], depth + 1) + ',';
+        }).join('\n') + '\n' + pad(depth - 1) + ']';
+    }
+    function toPython(value, depth) {
+        depth = depth || 1;
+        if (value === null) return 'None';
+        if (typeof value === 'boolean') return value ? 'True' : 'False';
+        if (typeof value === 'number') return String(value);
+        if (typeof value === 'string') return '"' + value.replace(/\\/g, '\\\\').replace(/"/g, '\\"') + '"';
+        if (Array.isArray(value)) {
+            if (!value.length) return '[]';
+            return '[\n' + value.map(function (v) { return pad(depth) + toPython(v, depth + 1) + ','; }).join('\n') + '\n' + pad(depth - 1) + ']';
+        }
+        var keys = Object.keys(value);
+        if (!keys.length) return '{}';
+        return '{\n' + keys.map(function (k) {
+            return pad(depth) + '"' + k.replace(/"/g, '\\"') + '": ' + toPython(value[k], depth + 1) + ',';
+        }).join('\n') + '\n' + pad(depth - 1) + '}';
+    }
+
     function buildCurl(req) {
         var parts = ["curl -X " + req.method.toUpperCase() + " '" + req.url + "'"];
         Object.keys(req.headers).forEach(function (k) { parts.push("  -H '" + k + ': ' + req.headers[k] + "'"); });
@@ -479,14 +535,105 @@
         return parts.join(' \\\n');
     }
 
-    function updateCurl() {
-        var code = document.getElementById('curlCode');
-        if (code) code.textContent = buildCurl(readForm());
+    function buildLaravel(req) {
+        var headers = {};
+        Object.keys(req.headers).forEach(function (k) { headers[k] = req.headers[k]; });
+        var method = req.method.toLowerCase();
+        var body = parsedBody(req);
+        var url = req.url.replace(/'/g, "\\'");
+        var segments = [];
+
+        if (headers.Authorization && headers.Authorization.indexOf('Bearer ') === 0) {
+            segments.push("withToken('" + headers.Authorization.slice(7).replace(/'/g, "\\'") + "')");
+            delete headers.Authorization;
+        }
+        // Passing an array body sets the JSON content type for us.
+        if (body !== undefined && typeof body !== 'string') delete headers['Content-Type'];
+        if (Object.keys(headers).length) {
+            segments.push('withHeaders(' + indentLines(toPhp(headers), '    ') + ')');
+        }
+
+        if (body === undefined) {
+            segments.push(method + "('" + url + "')");
+        } else if (typeof body === 'string') {
+            segments.push("withBody('" + body.replace(/'/g, "\\'") + "', 'application/json')");
+            segments.push(method + "('" + url + "')");
+        } else {
+            segments.push(method + "('" + url + "', " + indentLines(toPhp(body), '    ') + ')');
+        }
+        return 'use Illuminate\\Support\\Facades\\Http;\n\n$response = Http::' + segments.join('\n    ->') + ';';
     }
 
-    function copyCurl() {
-        var text = document.getElementById('curlCode').textContent;
-        var btn = document.getElementById('curlCopy');
+    function buildJs(req) {
+        var lines = ['const response = await fetch("' + req.url.replace(/"/g, '\\"') + '", {'];
+        lines.push('  method: "' + req.method.toUpperCase() + '",');
+        var hkeys = Object.keys(req.headers);
+        if (hkeys.length) {
+            lines.push('  headers: {');
+            lines.push(hkeys.map(function (k) {
+                return '    "' + k.replace(/"/g, '\\"') + '": "' + String(req.headers[k]).replace(/"/g, '\\"') + '"';
+            }).join(',\n'));
+            lines.push('  },');
+        }
+        var body = parsedBody(req);
+        if (body !== undefined) {
+            lines.push('  body: ' + (typeof body === 'string'
+                ? JSON.stringify(body)
+                : 'JSON.stringify(' + indentLines(JSON.stringify(body, null, 2), '  ') + ')') + ',');
+        }
+        lines.push('});');
+        lines.push('const data = await response.json();');
+        return lines.join('\n');
+    }
+
+    function buildPython(req) {
+        var args = ['    "' + req.url.replace(/"/g, '\\"') + '",'];
+        if (Object.keys(req.headers).length) {
+            args.push('    headers=' + indentLines(toPython(req.headers), '    ') + ',');
+        }
+        var body = parsedBody(req);
+        if (body !== undefined) {
+            args.push(typeof body === 'string'
+                ? '    data=' + JSON.stringify(body) + ','
+                : '    json=' + indentLines(toPython(body), '    ') + ',');
+        }
+        return 'import requests\n\nresponse = requests.' + req.method.toLowerCase() +
+            '(\n' + args.join('\n') + '\n)\nprint(response.json())';
+    }
+
+    var GENERATORS = {
+        curl: { label: 'cURL', build: buildCurl },
+        laravel: { label: 'Laravel', build: buildLaravel },
+        js: { label: 'JavaScript', build: buildJs },
+        python: { label: 'Python', build: buildPython },
+    };
+    var LANG_ORDER = ['curl', 'laravel', 'js', 'python'];
+
+    function activeLang() {
+        var saved = store.get('lang');
+        return GENERATORS[saved] ? saved : 'curl';
+    }
+
+    function onLangClick(e) {
+        var btn = e.target.closest('.snippet__lang');
+        if (!btn) return;
+        store.set('lang', btn.dataset.lang);
+        document.querySelectorAll('.snippet__lang').forEach(function (b) {
+            var on = b === btn;
+            b.classList.toggle('is-active', on);
+            b.setAttribute('aria-pressed', on ? 'true' : 'false');
+        });
+        updateSnippet();
+    }
+
+    function updateSnippet() {
+        var code = document.getElementById('snippetCode');
+        if (code) code.textContent = GENERATORS[activeLang()].build(readForm());
+    }
+
+    function copySnippet() {
+        var text = document.getElementById('snippetCode').textContent;
+        var btn = document.getElementById('snippetCopy');
         if (navigator.clipboard) {
             navigator.clipboard.writeText(text).then(function () {
                 btn.textContent = 'Copied';

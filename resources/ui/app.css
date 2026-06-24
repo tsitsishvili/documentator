@@ -445,7 +445,7 @@ a { color: inherit; }
     margin: 24px 0 12px; padding-top: 16px; border-top: 1px solid var(--border);
 }
 
-.curl {
+.snippet {
     margin-top: 20px;
     background: var(--surface);
     border: 1px solid var(--border);
@@ -453,14 +453,20 @@ a { color: inherit; }
     box-shadow: var(--shadow), var(--lift);
     overflow: hidden;
 }
-.curl__bar {
-    display: flex; align-items: center; justify-content: space-between;
-    padding: 9px 13px; border-bottom: 1px solid var(--border);
-    font-family: var(--mono); font-size: 10px; letter-spacing: .12em; text-transform: uppercase; color: var(--muted);
+.snippet__bar {
+    display: flex; align-items: center; justify-content: space-between; gap: 8px;
+    padding: 7px 10px 7px 8px; border-bottom: 1px solid var(--border);
 }
-.curl__copy { background: none; border: 0; cursor: pointer; color: var(--green); font-family: var(--mono); font-size: 10px; letter-spacing: .08em; text-transform: uppercase; }
-.curl__copy:hover { color: var(--blue); }
-.curl__code { margin: 0; padding: 13px; font-family: var(--mono); font-size: 11.5px; line-height: 1.6; color: var(--text-2); white-space: pre-wrap; word-break: break-all; }
+.snippet__langs { display: flex; flex-wrap: wrap; gap: 2px; }
+.snippet__lang {
+    background: none; border: 0; cursor: pointer; padding: 4px 9px; border-radius: 6px;
+    font-family: var(--mono); font-size: 10px; letter-spacing: .08em; text-transform: uppercase; color: var(--muted);
+}
+.snippet__lang:hover { color: var(--text-2); }
+.snippet__lang.is-active { background: var(--surface-3); color: var(--text); }
+.snippet__copy { flex: none; background: none; border: 0; cursor: pointer; color: var(--green); font-family: var(--mono); font-size: 10px; letter-spacing: .08em; text-transform: uppercase; }
+.snippet__copy:hover { color: var(--blue); }
+.snippet__code { margin: 0; padding: 13px; font-family: var(--mono); font-size: 11.5px; line-height: 1.6; color: var(--text-2); white-space: pre-wrap; word-break: break-all; }
 
 .console__foot { padding: 16px 18px; border-top: 1px solid var(--border); background: var(--bg-2); }
 .send {
