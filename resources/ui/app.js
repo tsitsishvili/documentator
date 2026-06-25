@@ -8,6 +8,8 @@
 
     var METHODS = ['get', 'post', 'put', 'patch', 'delete', 'head', 'options'];
     var BODY_METHODS = { post: 1, put: 1, patch: 1, delete: 1 };
+    var CONSOLE_MIN = 340;
+    var CONSOLE_MAX = 760;
 
     var cfg = window.__DOCUMENTATOR__ || {};
     var app = document.getElementById('app');
@@ -127,6 +129,56 @@
     function slugFor(entry) {
         return (entry.method + '-' + entry.path).toLowerCase()
             .replace(/[{}]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+    }
+
+    function plural(n, one, many) {
+        return n + ' ' + (n === 1 ? one : many);
+    }
+
+    function operationLabel(entry) {
+        return (entry.op && entry.op.summary) || entry.path;
+    }
+
+    function methodStats() {
+        var counts = {};
+        state.operations.forEach(function (entry) {
+            counts[entry.method] = (counts[entry.method] || 0) + 1;
+        });
+        return METHODS.filter(function (method) { return counts[method]; }).map(function (method) {
+            return '<span class="topbar__method m-' + method + '">' + method.toUpperCase() + ' ' + counts[method] + '</span>';
+        }).join('');
+    }
+
+    function isConsoleDocked() {
+        return !window.matchMedia('(max-width: 1180px)').matches;
+    }
+
+    function consoleMaxWidth() {
+        return Math.max(CONSOLE_MIN, Math.min(CONSOLE_MAX, window.innerWidth - 560));
+    }
+
+    function clampConsoleWidth(width) {
+        return Math.min(Math.max(Math.round(width), CONSOLE_MIN), consoleMaxWidth());
+    }
+
+    function updateConsoleResizeHandle(width) {
+        var handle = document.getElementById('consoleResize');
+        if (!handle) return;
+        handle.setAttribute('aria-valuemin', String(CONSOLE_MIN));
+        handle.setAttribute('aria-valuemax', String(consoleMaxWidth()));
+        handle.setAttribute('aria-valuenow', String(width || clampConsoleWidth(parseInt(getComputedStyle(document.documentElement).getPropertyValue('--console'), 10) || 440)));
+    }
+
+    function applyConsoleWidth(width, persist) {
+        var clamped = clampConsoleWidth(width);
+        document.documentElement.style.setProperty('--console', clamped + 'px');
+        updateConsoleResizeHandle(clamped);
+        if (persist) store.set('consoleWidth', String(clamped));
+    }
+
+    function restoreConsoleWidth() {
+        var saved = parseInt(store.get('consoleWidth') || '', 10);
+        applyConsoleWidth(isNaN(saved) ? 440 : saved, false);
     }
 
     function applyHash() {
@@ -302,7 +354,12 @@
                 '<button class="topbar__menu" id="menuBtn" aria-label="Toggle navigation">&#9776;</button>' +
                 '<div class="topbar__brand"><b>{ }</b>' + esc(info.title || cfg.title || 'API') + '</div>' +
                 version +
+                '<div class="topbar__meta" aria-label="API overview">' +
+                    '<span>' + esc(plural(state.operations.length, 'endpoint', 'endpoints')) + '</span>' +
+                    methodStats() +
+                '</div>' +
                 '<div class="topbar__actions">' + authBtn +
+                    '<button class="topbar__try" id="topbarTry" type="button" hidden>Try it</button>' +
                     '<a class="topbar__spec" href="' + esc(cfg.specUrl) + '" target="_blank" rel="noopener">openapi.json &#8599;</a>' +
                 '</div>' +
             '</header>'
@@ -316,18 +373,23 @@
                 '</aside>' +
                 '<main class="doc" id="doc"></main>' +
                 '<aside class="console" id="console">' +
+                    '<div class="console__resize" id="consoleResize" role="separator" aria-label="Resize request panel" aria-orientation="vertical" tabindex="0"></div>' +
                     '<div class="console__head" id="consoleHead"><span class="console__dot"></span>Request' +
                         '<button class="console__close" id="consoleClose" aria-label="Close console">&#10005;</button></div>' +
                     '<div class="console__body" id="consoleBody">' +
                         '<div id="consoleForm"></div><div id="responseMount"></div>' +
                     '</div>' +
-                    '<div class="console__foot"><button class="send" id="send">Send request</button></div>' +
+                    '<div class="console__foot">' +
+                        '<button class="clear-request" id="clearRequest" type="button">Clear</button>' +
+                        '<button class="send" id="send">Send request</button>' +
+                    '</div>' +
                 '</aside>' +
             '</div>'
         ));
         app.appendChild(el('<div class="scrim" id="scrim"></div>'));
         if (hasSecuritySchemes()) app.appendChild(el(authModalHtml()));
 
+        restoreConsoleWidth();
         wireShell();
         updateAuthButton();
         renderNav('');
@@ -343,6 +405,8 @@
             renderNav(e.target.value);
         });
         document.getElementById('send').addEventListener('click', send);
+        document.getElementById('clearRequest').addEventListener('click', clearRequestInputs);
+        document.getElementById('topbarTry').addEventListener('click', openConsole);
 
         var sidebar = document.getElementById('sidebar');
         var consoleEl = document.getElementById('console');
@@ -354,6 +418,7 @@
         var form = document.getElementById('consoleForm');
         form.addEventListener('input', onFormInput);
         form.addEventListener('change', updateSnippet); // selects + file pickers
+        wireConsoleResize();
 
         var authBtn = document.getElementById('authBtn');
         if (authBtn) authBtn.addEventListener('click', openAuth);
@@ -367,6 +432,68 @@
 
         window.addEventListener('hashchange', applyHash);
         document.addEventListener('keydown', onKeydown);
+        window.addEventListener('resize', function () {
+            if (isConsoleDocked()) {
+                applyConsoleWidth(parseInt(getComputedStyle(document.documentElement).getPropertyValue('--console'), 10) || 440, false);
+            }
+        });
+    }
+
+    function wireConsoleResize() {
+        var handle = document.getElementById('consoleResize');
+        var consoleEl = document.getElementById('console');
+        if (!handle || !consoleEl) return;
+
+        handle.addEventListener('pointerdown', function (e) {
+            if (!isConsoleDocked()) return;
+            e.preventDefault();
+
+            var startX = e.clientX;
+            var startWidth = consoleEl.getBoundingClientRect().width;
+            document.body.classList.add('is-resizing-console');
+            try { handle.setPointerCapture(e.pointerId); } catch (err) { /* pointer may already be captured */ }
+            var active = true;
+
+            function move(ev) {
+                applyConsoleWidth(startWidth - (ev.clientX - startX), false);
+            }
+
+            function done(ev) {
+                if (!active) return;
+                active = false;
+                document.removeEventListener('pointermove', move);
+                document.removeEventListener('pointerup', done);
+                document.removeEventListener('pointercancel', done);
+                handle.removeEventListener('lostpointercapture', done);
+                try { handle.releasePointerCapture(ev.pointerId); } catch (err) { /* capture may have ended */ }
+                document.body.classList.remove('is-resizing-console');
+                applyConsoleWidth(parseInt(getComputedStyle(document.documentElement).getPropertyValue('--console'), 10) || startWidth, true);
+            }
+
+            document.addEventListener('pointermove', move);
+            document.addEventListener('pointerup', done);
+            document.addEventListener('pointercancel', done);
+            handle.addEventListener('lostpointercapture', done);
+        });
+
+        handle.addEventListener('keydown', function (e) {
+            if (!isConsoleDocked()) return;
+            var current = parseInt(getComputedStyle(document.documentElement).getPropertyValue('--console'), 10) || 440;
+            var step = e.shiftKey ? 48 : 16;
+            if (e.key === 'ArrowLeft') {
+                e.preventDefault();
+                applyConsoleWidth(current + step, true);
+            } else if (e.key === 'ArrowRight') {
+                e.preventDefault();
+                applyConsoleWidth(current - step, true);
+            } else if (e.key === 'Home') {
+                e.preventDefault();
+                applyConsoleWidth(CONSOLE_MIN, true);
+            } else if (e.key === 'End') {
+                e.preventDefault();
+                applyConsoleWidth(consoleMaxWidth(), true);
+            }
+        });
     }
 
     function onFormInput(e) {
@@ -393,11 +520,30 @@
 
     function toggle(panel, scrim) {
         var open = panel.hasAttribute('data-open');
-        if (open) { close(panel, scrim); } else { panel.setAttribute('data-open', ''); scrim.setAttribute('data-show', ''); }
+        if (open) { close(panel, scrim); } else { openPanel(panel, scrim); }
+    }
+    function openPanel(panel, scrim) {
+        panel.setAttribute('data-open', '');
+        scrim.setAttribute('data-show', '');
     }
     function close(panel, scrim) {
         panel.removeAttribute('data-open');
         if (!document.querySelector('[data-open]')) scrim.removeAttribute('data-show');
+    }
+    function openConsole() {
+        var consoleEl = document.getElementById('console');
+        var scrim = document.getElementById('scrim');
+        if (!consoleEl || !scrim) return;
+        if (window.matchMedia('(max-width: 1180px)').matches) {
+            openPanel(consoleEl, scrim);
+            close(document.getElementById('sidebar'), scrim);
+        } else {
+            consoleEl.removeAttribute('data-open');
+            close(document.getElementById('sidebar'), scrim);
+            scrim.removeAttribute('data-show');
+        }
+        var first = consoleEl.querySelector('#consoleForm .input, #consoleForm .select, #consoleForm .textarea, #consoleForm button, .send');
+        if (first) first.focus();
     }
 
     /* ---------- authorize modal ---------- */
@@ -469,18 +615,23 @@
         var nav = document.getElementById('nav');
         var groups = groupsFor(filter);
         if (!groups.length) {
-            nav.innerHTML = '<p class="console__empty" style="color:var(--mist)">No matching endpoints.</p>';
+            nav.innerHTML = '<p class="nav__empty">No matching endpoints.</p>';
             return;
         }
         nav.innerHTML = groups.map(function (group) {
             var items = group.items.map(function (entry) {
                 var current = entry.id === state.currentId ? ' aria-current="true"' : '';
                 var dep = entry.op.deprecated ? ' is-deprecated' : '';
+                var summary = operationLabel(entry);
+                var summaryHtml = summary && summary !== entry.path
+                    ? '<span class="nav-item__summary">' + esc(summary) + '</span>' : '';
                 return '<li><button class="nav-item m-' + entry.method + dep + '" data-id="' + esc(entry.id) + '"' + current + '>' +
                     '<span class="method m-' + entry.method + '">' + entry.method + '</span>' +
-                    '<span class="nav-item__path">' + esc(entry.path) + '</span></button></li>';
+                    '<span class="nav-item__main"><span class="nav-item__path">' + esc(entry.path) + '</span>' +
+                    summaryHtml + '</span></button></li>';
             }).join('');
-            return '<div class="nav-group"><h2 class="nav-group__title">' + esc(group.tag) + '</h2><ul class="nav-list">' + items + '</ul></div>';
+            return '<div class="nav-group"><h2 class="nav-group__title"><span>' + esc(group.tag) + '</span>' +
+                '<span class="nav-group__count">' + group.items.length + '</span></h2><ul class="nav-list">' + items + '</ul></div>';
         }).join('');
     }
 
@@ -507,6 +658,8 @@
 
         renderDoc(entry);
         renderConsole(entry);
+        var tryBtn = document.getElementById('topbarTry');
+        if (tryBtn) tryBtn.removeAttribute('hidden');
 
         document.getElementById('responseMount').innerHTML = '';
 
@@ -577,8 +730,14 @@
 
         var deprecated = op.deprecated ? '<span class="badge-deprecated">Deprecated</span>' : '';
         html += '<div class="request-line"><span class="method m-' + entry.method + '">' + entry.method + '</span>' +
-            '<span class="path">' + pathSegments(entry.path) + '</span>' + deprecated + '</div>';
+            '<span class="path">' + pathSegments(entry.path) + '</span>' + deprecated +
+            '<button class="endpoint__try" id="endpointTry" type="button">Try it</button></div>';
         html += '<h1 class="endpoint__summary">' + esc(op.summary || entry.path) + '</h1>';
+        html += '<div class="endpoint__meta">' +
+            '<span>' + esc(entry.tag) + '</span>' +
+            (op.operationId ? '<span>' + esc(op.operationId) + '</span>' : '') +
+            '<span>' + esc(entry.method.toUpperCase()) + '</span>' +
+            '</div>';
         if (auth) html += '<div class="endpoint__auth">Requires authentication · ' + esc(auth.key) + '</div>';
         if (op.description) html += '<div class="endpoint__desc">' + block(op.description) + '</div>';
 
@@ -635,6 +794,7 @@
         html += '</article>';
         document.getElementById('doc').innerHTML = html;
         document.getElementById('doc').scrollTop = 0;
+        document.getElementById('endpointTry').addEventListener('click', openConsole);
     }
 
     /* ---------- console ---------- */
@@ -674,6 +834,27 @@
         }
 
         return field(name, control, required, typeLbl);
+    }
+
+    function clearRequestInputs() {
+        var form = document.getElementById('consoleForm');
+        if (!form) return;
+
+        form.querySelectorAll('[data-kind="path"], [data-kind="query"], [data-kind="body-field"], [data-kind="body-raw"]').forEach(function (control) {
+            if (control.type === 'file') {
+                control.value = '';
+            } else if (control.tagName === 'SELECT') {
+                control.selectedIndex = 0;
+            } else {
+                control.value = '';
+            }
+        });
+
+        document.getElementById('responseMount').innerHTML = '';
+        updateSnippet();
+
+        var first = form.querySelector('[data-kind="path"], [data-kind="query"], [data-kind="body-field"], [data-kind="body-raw"]');
+        if (first) first.focus();
     }
 
     function renderConsole(entry) {
@@ -729,13 +910,20 @@
         }
 
         var active = activeLang();
-        var tabs = LANG_ORDER.map(function (lang) {
+        var tabs = PRIMARY_LANGS.map(function (lang) {
             var on = lang === active;
             return '<button class="snippet__lang' + (on ? ' is-active' : '') + '" type="button" data-lang="' + lang +
                 '" aria-pressed="' + (on ? 'true' : 'false') + '">' + esc(GENERATORS[lang].label) + '</button>';
         }).join('');
+        var otherActive = OTHER_LANGS.indexOf(active) !== -1;
+        var otherOpts = ['<option value="" disabled' + (otherActive ? '' : ' selected') + '>Other</option>']
+            .concat(OTHER_LANGS.map(function (lang) {
+                return '<option value="' + lang + '"' + (lang === active ? ' selected' : '') + '>' + esc(GENERATORS[lang].label) + '</option>';
+            })).join('');
+        var otherSelect = '<select class="snippet__other' + (otherActive ? ' is-active' : '') +
+            '" id="snippetOther" aria-label="Other languages">' + otherOpts + '</select>';
         html += '<div class="snippet">' +
-            '<div class="snippet__bar"><div class="snippet__langs" id="snippetLangs">' + tabs + '</div>' +
+            '<div class="snippet__bar"><div class="snippet__langs" id="snippetLangs">' + tabs + otherSelect + '</div>' +
             '<button class="snippet__copy" id="snippetCopy" type="button">Copy</button></div>' +
             '<pre class="snippet__code" id="snippetCode"></pre></div>';
 
@@ -744,6 +932,7 @@
         if (consoleAuthBtn) consoleAuthBtn.addEventListener('click', openAuth);
         document.getElementById('snippetCopy').addEventListener('click', copySnippet);
         document.getElementById('snippetLangs').addEventListener('click', onLangClick);
+        document.getElementById('snippetOther').addEventListener('change', onOtherChange);
         updateSnippet();
     }
 
@@ -997,13 +1186,236 @@
             '(\n' + args.join('\n') + '\n)\nprint(response.json())';
     }
 
+    /* ---------- TypeScript types ---------- */
+
+    function tsKey(k) {
+        return /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(k) ? k : JSON.stringify(k);
+    }
+
+    /* `requireAll` drops the `?` modifier: responses are guaranteed by the server
+       (an absent OpenAPI `required` list doesn't mean "sometimes missing" — that's
+       what `| null` is for), so their fields stay required. Requests honour the
+       `required` list, where omission is meaningful. */
+    function tsObject(schema, depth, requireAll) {
+        var props = schema.properties || {};
+        var keys = Object.keys(props);
+        if (!keys.length) return 'Record<string, unknown>';
+        var reqd = schema.required || [];
+        var lines = keys.map(function (k) {
+            var opt = requireAll || reqd.indexOf(k) !== -1 ? '' : '?';
+            return pad(depth + 1) + tsKey(k) + opt + ': ' + tsType(props[k], depth + 1, requireAll) + ';';
+        });
+        return '{\n' + lines.join('\n') + '\n' + pad(depth) + '}';
+    }
+
+    /* An OpenAPI schema as a TypeScript type literal (2 spaces per level). */
+    function tsType(schema, depth, requireAll) {
+        depth = depth || 0;
+        if (!schema) return 'unknown';
+        var nul = isNullable(schema) ? ' | null' : '';
+        if (schema.oneOf || schema.anyOf) {
+            return ((schema.oneOf || schema.anyOf).map(function (s) { return tsType(s, depth, requireAll); }).join(' | ') || 'unknown') + nul;
+        }
+        if (schema.enum) {
+            return schema.enum.map(function (v) {
+                return typeof v === 'string' ? JSON.stringify(v) : String(v);
+            }).join(' | ') + nul;
+        }
+        var t = typesOf(schema)[0];
+        if (t === 'array') {
+            var inner = schema.items ? tsType(schema.items, depth, requireAll) : 'unknown';
+            var wrapped = /[ |]/.test(inner) && inner.charAt(0) !== '{' ? '(' + inner + ')' : inner;
+            return wrapped + '[]' + nul;
+        }
+        if (t === 'object' || schema.properties) return tsObject(schema, depth, requireAll) + nul;
+        if (t === 'integer' || t === 'number') return 'number' + nul;
+        if (t === 'boolean') return 'boolean' + nul;
+        if (t === 'string') {
+            if (schema.format === 'date' || schema.format === 'date-time') return 'Date' + nul;
+            return 'string' + nul;
+        }
+        return 'unknown' + nul;
+    }
+
+    /* Does the schema carry a date/date-time anywhere? Drives whether the fetch
+       wrapper needs the date-reviving JSON parse. */
+    function schemaHasDate(schema, seen) {
+        if (!schema || typeof schema !== 'object') return false;
+        if (schema.format === 'date' || schema.format === 'date-time') return true;
+        seen = seen || [];
+        if (seen.indexOf(schema) !== -1) return false;
+        seen.push(schema);
+        if (schema.items && schemaHasDate(schema.items, seen)) return true;
+        if (schema.properties) {
+            var keys = Object.keys(schema.properties);
+            for (var i = 0; i < keys.length; i++) {
+                if (schemaHasDate(schema.properties[keys[i]], seen)) return true;
+            }
+        }
+        var unions = schema.oneOf || schema.anyOf || schema.allOf;
+        if (unions) {
+            for (var j = 0; j < unions.length; j++) {
+                if (schemaHasDate(unions[j], seen)) return true;
+            }
+        }
+        return false;
+    }
+
+    function isDateField(schema) {
+        return typesOf(schema)[0] === 'string' && (schema.format === 'date' || schema.format === 'date-time');
+    }
+
+    /* `new Date(x)`, guarding null when the field allows it. */
+    function dateFieldExpr(schema, acc) {
+        return isNullable(schema) ? acc + ' ? new Date(' + acc + ') : null' : 'new Date(' + acc + ')';
+    }
+
+    /* `{ ...src, <date overrides> }` — only the date-bearing props are rewritten. */
+    function spreadLiteral(schema, src, pad, paren, depth) {
+        var inner = pad + '  ';
+        var props = schema.properties || {};
+        var parts = ['...' + src + ','];
+        Object.keys(props).forEach(function (k) {
+            if (schemaHasDate(props[k])) parts.push(k + ': ' + convertExpr(props[k], src + '.' + k, inner, depth) + ',');
+        });
+        return (paren ? '({' : '{') + '\n' + inner + parts.join('\n' + inner) + '\n' + pad + (paren ? '})' : '}');
+    }
+
+    /* An expression that yields `acc` with its dates converted. Assumes the
+       subtree actually contains a date (callers gate on `schemaHasDate`). */
+    function convertExpr(schema, acc, pad, depth) {
+        if (isDateField(schema)) return dateFieldExpr(schema, acc);
+        var t = typesOf(schema)[0];
+        if (t === 'array' && schema.items && schemaHasDate(schema.items)) {
+            var item = schema.items;
+            var v = depth ? 'item' + depth : 'item';
+            if (typesOf(item)[0] === 'object' || item.properties) {
+                return acc + '.map((' + v + ': any) => ' + spreadLiteral(item, v, pad, true, depth + 1) + ')';
+            }
+            return acc + '.map((' + v + ': any) => ' + dateFieldExpr(item, v) + ')';
+        }
+        var lit = spreadLiteral(schema, acc, pad, false, depth);
+        return isNullable(schema) ? acc + ' ? ' + lit + ' : ' + acc : lit;
+    }
+
+    /* The wrapper lines that parse the body and hydrate its dates in place. */
+    function hydrationLines(schema, resType) {
+        if (typesOf(schema)[0] === 'array' && schema.items && schemaHasDate(schema.items)) {
+            return ['  const data = (await response.json()) as ' + resType + ';',
+                '  return ' + convertExpr(schema, 'data', '  ', 0) + ';'];
+        }
+        var lines = ['  const data = (await response.json()) as ' + resType + ';'];
+        var props = schema.properties || {};
+        Object.keys(props).forEach(function (k) {
+            if (schemaHasDate(props[k])) lines.push('  data.' + k + ' = ' + convertExpr(props[k], 'data.' + k, '  ', 0) + ';');
+        });
+        lines.push('  return data;');
+        return lines;
+    }
+
+    /* A named declaration: `interface` for plain objects, `type` for everything else. */
+    function tsDeclaration(name, schema, requireAll) {
+        var t = typesOf(schema)[0];
+        if ((t === 'object' || schema.properties) && !isNullable(schema) && !schema.oneOf && !schema.anyOf) {
+            return 'interface ' + name + ' ' + tsObject(schema, 0, requireAll);
+        }
+        return 'type ' + name + ' = ' + tsType(schema, 0, requireAll) + ';';
+    }
+
+    /* First 2xx response carrying a schema. */
+    function successSchema(op) {
+        var responses = op.responses || {};
+        var codes = Object.keys(responses);
+        for (var i = 0; i < codes.length; i++) {
+            if (codes[i].charAt(0) === '2') {
+                var s = responseSchema(responses[codes[i]]);
+                if (s) return s;
+            }
+        }
+        return null;
+    }
+
+    function pascalCase(s) {
+        var parts = String(s || 'Endpoint').replace(/[^A-Za-z0-9]+/g, ' ').trim().split(' ');
+        return parts.map(function (w) { return w.charAt(0).toUpperCase() + w.slice(1); }).join('') || 'Endpoint';
+    }
+
+    function buildTypeScript(req) {
+        var entry = entryById(state.currentId);
+        var op = entry.op;
+        // Drop the noise-word "Controller" so names read as ProductIndex, not
+        // ProductControllerIndex. Guard against emptying a controller literally
+        // named "Controller".
+        var base = pascalCase(op.operationId || (entry.method + ' ' + entry.path));
+        var trimmed = base.replace(/Controller/g, '');
+        if (trimmed) base = trimmed;
+        var fnName = base.charAt(0).toLowerCase() + base.slice(1);
+        var blocks = [];
+
+        var content = requestBodyContent(op);
+        var hasBody = !!(content && content.schema && BODY_METHODS[entry.method]);
+        var multipart = hasBody && content.mediaType === 'multipart/form-data';
+        var reqType = base + 'Request';
+        if (hasBody) blocks.push(tsDeclaration(reqType, content.schema, false));
+
+        var resSchema = successSchema(op);
+        var resType = base + 'Response';
+        if (resSchema) blocks.push(tsDeclaration(resType, resSchema, true));
+
+        // Hydrate dates only when the response actually carries one.
+        var hydrate = resSchema && schemaHasDate(resSchema);
+
+        var headers = {};
+        Object.keys(req.headers).forEach(function (k) { headers[k] = req.headers[k]; });
+        if (multipart) delete headers['Content-Type'];
+
+        var ret = resSchema ? 'Promise<' + resType + '>' : 'Promise<void>';
+        var lines = ['async function ' + fnName + '(' + (hasBody ? 'body: ' + reqType : '') + '): ' + ret + ' {'];
+
+        if (multipart) {
+            lines.push('  const form = new FormData();');
+            lines.push('  Object.entries(body).forEach(([k, v]) => form.append(k, v as string | Blob));');
+            lines.push('');
+        }
+
+        lines.push('  const response = await fetch("' + req.url.replace(/"/g, '\\"') + '", {');
+        lines.push('    method: "' + req.method.toUpperCase() + '",');
+        var hkeys = Object.keys(headers);
+        if (hkeys.length) {
+            lines.push('    headers: {');
+            lines.push(hkeys.map(function (k) {
+                return '      "' + k.replace(/"/g, '\\"') + '": "' + String(headers[k]).replace(/"/g, '\\"') + '"';
+            }).join(',\n'));
+            lines.push('    },');
+        }
+        if (multipart) lines.push('    body: form,');
+        else if (hasBody) lines.push('    body: JSON.stringify(body),');
+        lines.push('  });');
+        lines.push('');
+        lines.push('  if (!response.ok) throw new Error(`HTTP ${response.status} ${response.statusText}`);');
+        if (resSchema && hydrate) {
+            lines.push('');
+            lines = lines.concat(hydrationLines(resSchema, resType));
+        } else if (resSchema) {
+            lines.push('  return response.json();');
+        }
+        lines.push('}');
+
+        blocks.push(lines.join('\n'));
+        return blocks.join('\n\n');
+    }
+
     var GENERATORS = {
         curl: { label: 'cURL', build: buildCurl },
-        laravel: { label: 'Laravel', build: buildLaravel },
-        js: { label: 'JavaScript', build: buildJs },
+        php: { label: 'PHP', build: buildLaravel },
+        js: { label: 'JS', build: buildJs },
+        typescript: { label: 'TypeScript', build: buildTypeScript },
         python: { label: 'Python', build: buildPython },
     };
-    var LANG_ORDER = ['curl', 'laravel', 'js', 'python'];
+    /* Languages shown as tabs; the rest live in the "Other" dropdown. */
+    var PRIMARY_LANGS = ['curl', 'php', 'js', 'typescript'];
+    var OTHER_LANGS = ['python'];
+    var LANG_ORDER = PRIMARY_LANGS.concat(OTHER_LANGS);
 
     function activeLang() {
         var saved = store.get('lang');
@@ -1019,6 +1431,20 @@
             b.classList.toggle('is-active', on);
             b.setAttribute('aria-pressed', on ? 'true' : 'false');
         });
+        var other = document.getElementById('snippetOther');
+        if (other) { other.classList.remove('is-active'); other.value = ''; }
+        updateSnippet();
+    }
+
+    function onOtherChange(e) {
+        var lang = e.target.value;
+        if (!GENERATORS[lang]) return;
+        store.set('lang', lang);
+        document.querySelectorAll('.snippet__lang').forEach(function (b) {
+            b.classList.remove('is-active');
+            b.setAttribute('aria-pressed', 'false');
+        });
+        e.target.classList.add('is-active');
         updateSnippet();
     }
 
@@ -1027,7 +1453,7 @@
        already-escaped text and wraps tokens in the fixed tok-* span set, so
        textContent (what Copy reads) still returns the verbatim source. */
     function highlightCode(escaped) {
-        var re = /(#[^\n]*)|(&quot;(?:\\.|(?!&quot;).)*&quot;|&#39;(?:\\.|(?!&#39;).)*&#39;)|\b(true|false|null|None|True|False|const|let|var|await|async|function|return|use|import|from|new|print|def|class)\b|(\b\d+(?:\.\d+)?\b)/g;
+        var re = /(#[^\n]*)|(&quot;(?:\\.|(?!&quot;).)*&quot;|&#39;(?:\\.|(?!&#39;).)*&#39;)|\b(true|false|null|None|True|False|const|let|var|await|async|function|return|use|import|from|new|print|def|class|interface|type|Promise|throw|void|extends|as)\b|(\b\d+(?:\.\d+)?\b)/g;
         return escaped.replace(re, function (m, comment, str, kw, num) {
             if (comment) return '<span class="tok-comment">' + comment + '</span>';
             if (str) return '<span class="tok-str">' + str + '</span>';
@@ -1063,7 +1489,15 @@
 
         btn.disabled = true;
         head.setAttribute('data-busy', '');
-        mount.innerHTML = '';
+        mount.innerHTML =
+            '<div class="response response--pending" aria-live="polite">' +
+                '<div class="response__status">' +
+                    '<span class="response__label">Response</span>' +
+                    '<span class="response__spinner"></span>' +
+                    '<span class="response__text">Waiting for ' + esc(req.method.toUpperCase()) + '</span>' +
+                '</div>' +
+            '</div>';
+        revealResponse();
 
         var options = { method: req.method.toUpperCase(), headers: {} };
         Object.keys(req.headers).forEach(function (k) { options.headers[k] = req.headers[k]; });
@@ -1123,10 +1557,87 @@
         });
     }
 
+    function revealResponse() {
+        var mount = document.getElementById('responseMount');
+        var body = document.getElementById('consoleBody');
+        if (!mount || !body) return;
+
+        requestAnimationFrame(function () {
+            var reduced = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+            body.scrollTo({
+                top: Math.max(mount.offsetTop - 12, 0),
+                behavior: reduced ? 'auto' : 'smooth',
+            });
+        });
+    }
+
+    function jsonType(value) {
+        if (value === null) return 'null';
+        if (Array.isArray(value)) return 'array';
+        return typeof value;
+    }
+
+    function jsonScalar(value) {
+        var type = jsonType(value);
+        if (type === 'string') return '<span class="tok-str">' + esc(JSON.stringify(value)) + '</span>';
+        if (type === 'number') return '<span class="tok-num">' + esc(value) + '</span>';
+        if (type === 'boolean') return '<span class="tok-bool">' + esc(value) + '</span>';
+        if (type === 'null') return '<span class="tok-null">null</span>';
+        return '<span class="tok-null">' + esc(String(value)) + '</span>';
+    }
+
+    function jsonKeyLabel(key) {
+        if (key === null || key === undefined) return '';
+        return typeof key === 'number' ? '[' + key + ']' : key;
+    }
+
+    function jsonNode(value, key, depth) {
+        var type = jsonType(value);
+        var keyLabel = jsonKeyLabel(key);
+        var keyHtml = keyLabel !== ''
+            ? '<span class="response-json__key">' + esc(keyLabel) + '</span><span class="response-json__colon">:</span>'
+            : '<span class="response-json__key">root</span>';
+
+        if (type !== 'object' && type !== 'array') {
+            return '<div class="response-json__row">' + keyHtml + ' ' + jsonScalar(value) + '</div>';
+        }
+
+        var isArray = type === 'array';
+        var items = isArray ? value : Object.keys(value);
+        var count = isArray ? value.length : items.length;
+        var summary = count + ' ' + (isArray ? (count === 1 ? 'item' : 'items') : (count === 1 ? 'field' : 'fields'));
+        var empty = count === 0;
+        var open = depth < 2 && !empty ? ' open' : '';
+        var children = '';
+
+        if (!empty) {
+            children = (isArray ? value.map(function (item, i) {
+                return jsonNode(item, i, depth + 1);
+            }) : Object.keys(value).map(function (name) {
+                return jsonNode(value[name], name, depth + 1);
+            })).join('');
+        }
+
+        return '<details class="response-json response-json--' + type + '"' + open + '>' +
+            '<summary>' + keyHtml +
+                ' <span class="response-json__brace">' + esc(isArray ? '[' : '{') + '</span>' +
+                ' <span class="response-json__meta">' + esc(summary) + '</span>' +
+                (empty ? '<span class="response-json__empty">empty</span>' : '') +
+            '</summary>' +
+            (empty ? '' : '<div class="response-json__children">' + children + '</div>') +
+            '<div class="response-json__end">' + esc(isArray ? ']' : '}') + '</div>' +
+        '</details>';
+    }
+
+    function jsonTree(value) {
+        return '<div class="response__tree">' + jsonNode(value, null, 0) + '</div>';
+    }
+
     function renderResponse(res, text, ms) {
         var isJson = false;
+        var parsedJson = null;
         var body = text;
-        try { body = JSON.stringify(JSON.parse(text), null, 2); isJson = true; } catch (e) { /* keep raw */ }
+        try { parsedJson = JSON.parse(text); body = JSON.stringify(parsedJson, null, 2); isJson = true; } catch (e) { /* keep raw */ }
 
         var size = formatBytes(new Blob([text]).size);
         var ctype = (res.headers.get('content-type') || '').split(';')[0].trim();
@@ -1143,21 +1654,29 @@
 
         var bodyHtml = text === ''
             ? '<div class="response__empty">No content</div>'
-            : '<pre class="response__body">' + (isJson ? highlightJson(esc(body)) : esc(body)) + '</pre>';
+            : (isJson ? jsonTree(parsedJson) : '<pre class="response__body">' + esc(body) + '</pre>');
         var copyBtn = text === '' ? '' : '<button class="response__copy" type="button">Copy</button>';
+        var treeControls = isJson
+            ? '<span class="response__tree-controls">' +
+                '<button class="response__tree-action" type="button" data-json-action="expand">Expand all</button>' +
+                '<button class="response__tree-action" type="button" data-json-action="collapse">Collapse all</button>' +
+            '</span>'
+            : '';
 
         document.getElementById('responseMount').innerHTML =
-            '<div class="response">' +
+            '<div class="response" aria-live="polite">' +
                 '<div class="response__status">' +
+                    '<span class="response__label">Response</span>' +
                     '<span class="response__code" data-class="' + statusClass(res.status) + '">' + esc(res.status) + '</span>' +
                     '<span class="response__text">' + esc(res.statusText || '') + '</span>' +
                     ctypeTag +
                     '<span class="response__meta">' + esc(size) + ' · ' + ms + ' ms</span>' +
                 '</div>' +
-                '<details open><summary>Body' + copyBtn + '</summary>' + bodyHtml + '</details>' +
+                '<details open><summary>Body' + treeControls + copyBtn + '</summary>' + bodyHtml + '</details>' +
                 '<details><summary>Headers <span class="summary__count">' + headers.length + '</span></summary>' +
                     '<div class="response__headers">' + headerRows + '</div></details>' +
             '</div>';
+        revealResponse();
 
         var btn = document.querySelector('.response__copy');
         if (btn) btn.addEventListener('click', function (e) {
@@ -1169,14 +1688,26 @@
                 setTimeout(function () { btn.textContent = 'Copy'; }, 1400);
             });
         });
+
+        document.querySelectorAll('.response__tree-action').forEach(function (control) {
+            control.addEventListener('click', function (e) {
+                e.preventDefault();
+                e.stopPropagation();
+                var open = control.dataset.jsonAction === 'expand';
+                document.querySelectorAll('.response-json').forEach(function (node) {
+                    node.open = open;
+                });
+            });
+        });
     }
 
     function renderError(err, url) {
         document.getElementById('responseMount').innerHTML =
-            '<div class="response"><div class="response__status"><span class="response__code" data-class="x">—</span>' +
+            '<div class="response" aria-live="polite"><div class="response__status"><span class="response__label">Response</span><span class="response__code" data-class="x">—</span>' +
             '<span>Request failed</span></div><div class="response__hint">Couldn’t reach <b>' + esc(url) + '</b>. ' +
             'This is usually CORS: the API must allow requests from this docs origin (' + esc(location.origin) +
             '), or the server URL is wrong. Browser detail: ' + esc(err && err.message) + '</div></div>';
+        revealResponse();
     }
 
     /* ---------- boot ---------- */

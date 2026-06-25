@@ -25,8 +25,15 @@ final class DocsController
         return view('documentator::docs', [
             'title' => config('documentator.title'),
             'specUrl' => route('documentator.openapi'),
-            'cssUrl' => route('documentator.asset', 'app.css'),
-            'jsUrl' => route('documentator.asset', 'app.js'),
+            'cssUrl' => $this->assetUrl('app.css'),
+            'jsUrl' => $this->assetUrl('app.js'),
         ]);
+    }
+
+    private function assetUrl(string $asset): string
+    {
+        $path = __DIR__.'/../../../resources/ui/'.$asset;
+
+        return route('documentator.asset', $asset).'?v='.(is_file($path) ? filemtime($path) : '1');
     }
 }

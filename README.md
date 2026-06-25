@@ -11,7 +11,8 @@ descriptions, and try requests live.
 - **Zero-config by default** — point it at `api/*` and you get docs.
 - **Attribute overrides** — enrich or correct any inferred detail.
 - **Built-in explorer** — a dark "Aurora" UI (no external assets) with a request
-  playground, auth, and live cURL. Or switch to [Scalar](https://scalar.com).
+  playground, auth, snippets, and a readable response viewer. Or switch to
+  [Scalar](https://scalar.com).
 - **Standard output** — a plain OpenAPI 3.1 document other tools can consume.
 
 Requires PHP 8.2+ and Laravel 12 or 13.
@@ -122,9 +123,18 @@ authenticated opt out automatically and stay public.
 The built-in explorer can call your API live. It remembers the auth token and
 selected server across endpoints, deep-links each endpoint (`#get-api-orders`)
 for sharing and reload, renders Markdown in descriptions, and shows a copyable
-request snippet in **cURL, Laravel's `Http` facade, JavaScript (`fetch`) and
-Python (`requests`)** — the chosen language is remembered too. Shortcuts: `/`
-focuses search, `Cmd/Ctrl+Enter` sends, `Esc` closes panels.
+request snippet in **cURL, PHP (Laravel `Http`), JavaScript (`fetch`),
+TypeScript and Python (`requests`)** — cURL, PHP, JS and TypeScript as tabs with
+the rest under an **Other** dropdown, and the chosen language is remembered too.
+The TypeScript snippet generates typed `Request` / `Response` interfaces and an
+`async` `fetch` wrapper (with `Date` hydration).
+
+The request panel is resizable on desktop and becomes an off-canvas drawer on
+smaller screens. Use **Clear** to reset path, query and body inputs without
+forgetting the selected server or auth token. JSON responses render as a
+collapsible tree with **Expand all** / **Collapse all**, while **Copy** still
+copies the full formatted response body. Shortcuts: `/` focuses search,
+`Cmd/Ctrl+Enter` sends, `Esc` closes panels.
 Cross-origin "try it" calls require the API to allow CORS from the docs origin.
 
 ## Production
