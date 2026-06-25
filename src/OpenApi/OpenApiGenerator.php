@@ -129,13 +129,21 @@ final class OpenApiGenerator
      */
     private function parameter(ParameterData $param, string $in, bool $required): array
     {
+        $schema = $this->schema($param);
+
         return array_filter([
             'name' => $param->name,
             'in' => $in,
             'required' => $required,
             'description' => $param->description,
-            'schema' => $this->schema($param),
+            'schema' => $schema,
+            'example' => $param->example ?? ($this->generatesExamples() ? SchemaSampler::sample($schema) : null),
         ], fn ($value) => $value !== null);
+    }
+
+    private function generatesExamples(): bool
+    {
+        return (bool) config('documentator.generate_examples', true);
     }
 
     /**
@@ -168,9 +176,16 @@ final class OpenApiGenerator
             ? 'multipart/form-data'
             : 'application/json';
 
+        $content = ['schema' => $schema];
+
+        // A whole-body example so the playground starts with a fillable payload.
+        if ($this->generatesExamples() && $mediaType === 'application/json') {
+            $content['example'] = SchemaSampler::sample($schema);
+        }
+
         return [
             'required' => $required !== [],
-            'content' => [$mediaType => ['schema' => $schema]],
+            'content' => [$mediaType => $content],
         ];
     }
 
@@ -179,17 +194,56 @@ final class OpenApiGenerator
      */
     private function responses(EndpointData $endpoint): array
     {
-        if ($endpoint->responses === []) {
-            return ['200' => ['description' => 'Successful response']];
-        }
-
         $responses = [];
+
+        // Guarantee a success response even when only error responses were
+        // inferred, so an endpoint never documents 4xx with no 2xx. Seeded first
+        // so it stays the leading entry. The status follows the verb convention
+        // (POST -> 201, DELETE -> 204) when nothing carried a body.
+        if (! $this->hasSuccessResponse($endpoint)) {
+            [$status, $description] = $this->fallbackSuccess($endpoint);
+            $responses[$status] = ['description' => $description];
+        }
 
         foreach ($endpoint->responses as $response) {
             $responses[(string) $response->status] = $this->response($response);
         }
 
         return $responses;
+    }
+
+    /**
+     * The status + description for the guaranteed success response of an endpoint
+     * that produced no 2xx of its own: a verb convention (POST -> 201 Created,
+     * DELETE -> 204 No Content) unless status inference is disabled.
+     *
+     * @return array{0: string, 1: string}
+     */
+    private function fallbackSuccess(EndpointData $endpoint): array
+    {
+        if (config('documentator.infer_status_codes', true)) {
+            $verbs = $endpoint->verbs();
+
+            if (in_array('post', $verbs, true)) {
+                return ['201', 'Created'];
+            }
+            if (in_array('delete', $verbs, true)) {
+                return ['204', 'No content'];
+            }
+        }
+
+        return ['200', 'Successful response'];
+    }
+
+    private function hasSuccessResponse(EndpointData $endpoint): bool
+    {
+        foreach ($endpoint->responses as $response) {
+            if ($response->status >= 200 && $response->status < 300) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**

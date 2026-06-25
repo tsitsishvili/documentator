@@ -136,6 +136,12 @@ final class ExtractAttributes implements ExtractionStrategy
                 resource: $response->resource,
                 schema: $this->responseSchema($response),
             );
+
+            if ($response->paginated) {
+                foreach (PaginationSchema::queryParameters() as $name => $param) {
+                    $endpoint->queryParameters[$name] ??= $param;
+                }
+            }
         }
     }
 

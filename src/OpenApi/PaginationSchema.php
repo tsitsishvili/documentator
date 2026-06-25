@@ -4,11 +4,40 @@ declare(strict_types=1);
 
 namespace Tsitsishvili\Documentator\OpenApi;
 
+use Tsitsishvili\Documentator\Data\ParameterData;
+
 /**
  * Wraps an item schema in Laravel's resource-collection envelopes.
  */
 final class PaginationSchema
 {
+    /**
+     * The query parameters Laravel's paginator reads off the request, so a
+     * paginated endpoint documents `?page=` and `?per_page=` without anyone
+     * declaring them.
+     *
+     * @return array<string, ParameterData>
+     */
+    public static function queryParameters(): array
+    {
+        return [
+            'page' => new ParameterData(
+                name: 'page',
+                type: 'integer',
+                description: 'Page number of the paginated result set.',
+                example: 1,
+                schema: ['type' => 'integer', 'minimum' => 1],
+            ),
+            'per_page' => new ParameterData(
+                name: 'per_page',
+                type: 'integer',
+                description: 'Number of items to return per page.',
+                example: 15,
+                schema: ['type' => 'integer', 'minimum' => 1],
+            ),
+        ];
+    }
+
     /**
      * `{ "data": [ item ] }` — a non-paginated resource collection.
      *

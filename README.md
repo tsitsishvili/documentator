@@ -37,17 +37,40 @@ pipeline enriches the endpoint:
 
 | Source | Produces |
 | --- | --- |
-| Route definition | verbs, URI, path params, name, auth guess from `auth` middleware |
-| FormRequest `rules()` | body parameters with types, required, **enums** (`in:`), **formats** (email/uuid/date), bounds (`min`/`max`), nullability, **nested** rules (`items.*.id`), and **file uploads** → multipart |
-| Controller return type | a success response with a body schema read from the Resource's `toArray()` — nested resources followed, types from the **model's `$casts`**, `whenLoaded` fields optional, `ResourceCollection` wrapped in the **paginator envelope** |
+| Route definition | verbs, URI, **typed path params** (numeric constraint / bound-model key → `integer`), name, auth guess from `auth` middleware |
+| Controller PHPDoc | **summary** (first line) and **description** (the rest), so written docblocks become docs |
+| FormRequest `rules()` | parameters with types, required, **enums** (`in:`, `Rule::enum`, `Rule::in`), **formats** (email/uuid/date), bounds (`min`/`max`), `regex`→`pattern`, `digits`→integer, `confirmed`→a `_confirmation` field, nullability, **nested** rules (`items.*.id`), **file uploads** → multipart. On GET/HEAD routes these become **query parameters** instead of a body |
+| spatie/laravel-data | request/response **Data objects** — typed properties, enums, nested Data, collections (optional, auto-detected) |
+| Controller return type | a success response schema from a Resource's `toArray()`, a `ResourceCollection` (**paginator envelope** + `page`/`per_page` query params), or an **Eloquent model** (`$casts` + `@property`). Status follows the verb: POST → **201**, DELETE → **204** |
+| Generated examples | a representative `example` for every body/parameter (`email`→`user@example.com`, enums, dates, …) so the playground starts filled |
 | PHP attributes | overrides for everything above (runs last) |
 
 ```php
-// Inferred with no annotations: path param {order}, body params from
-// StoreOrderRequest::rules(), a 200 response from OrderResource.
+/**
+ * Create an order.
+ *
+ * Charges the customer and returns the created order. This summary and
+ * description are read straight from the docblock — no attributes needed.
+ */
 public function store(StoreOrderRequest $request): OrderResource
 {
+    // Inferred with no attributes: path param {order}, body params from
+    // StoreOrderRequest::rules(), a 201 response from OrderResource.
     return new OrderResource(Order::create($request->validated()));
+}
+```
+
+### With spatie/laravel-data
+
+Install [`spatie/laravel-data`](https://github.com/spatie/laravel-data) and any
+Data object you type-hint is documented with no extra annotation — request fields
+from the argument, response schema from the return type:
+
+```php
+public function store(CreateOrderData $data): OrderData
+{
+    // body params from CreateOrderData's typed properties; 201 response from OrderData
+    return OrderData::from(Order::create($data->toArray()));
 }
 ```
 
@@ -127,6 +150,18 @@ php artisan documentator:export openapi.json        # write the OpenAPI spec for
 php artisan documentator:postman collection.json    # export a Postman v2.1 collection
 ```
 
+### Keeping docs honest in CI
+
+`documentator:check` audits the generated docs — it flags closure routes (which
+can't be introspected) and endpoints with no documented success schema, and can
+detect drift from a committed spec:
+
+```bash
+php artisan documentator:check                       # report issues (exit 0)
+php artisan documentator:check --strict              # fail the build if any issue is found
+php artisan documentator:check --against=openapi.json # fail if the spec has drifted; re-export and commit
+```
+
 ## Configuration
 
 Key options in `config/documentator.php`:
@@ -137,6 +172,9 @@ Key options in `config/documentator.php`:
 - `title` / `version` / `description` / `servers` — OpenAPI `info` and server list.
 - `security` — auth schemes.
 - `authenticate` — require a scheme API-wide (`true` = the `default` scheme, or a scheme name); `false` = per-endpoint.
+- `error_responses` — infer conventional 401/403/404/422 responses from the endpoint shape (default `true`).
+- `infer_status_codes` — pick the success status from the verb (POST → 201, DELETE → 204) instead of always 200 (default `true`).
+- `generate_examples` — seed an example for every body/parameter that lacks one (default `true`).
 - `models_namespace` — where Resources' wrapped models live (for cast-based typing).
 - `ui.driver` — `documentator` (built-in explorer, default) or `scalar`.
 - `ui.assets` — Scalar bundle URL when `ui.driver = scalar` (pinned; self-host for SRI/CSP).
@@ -149,3 +187,6 @@ composer install
 composer test      # Pest + Orchestra Testbench
 composer lint      # Laravel Pint
 ```
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the architecture tour, how to add an
+inference strategy or attribute, and the pull-request checklist.

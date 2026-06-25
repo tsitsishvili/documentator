@@ -107,6 +107,34 @@ final class ResourceSchemaExtractor
     }
 
     /**
+     * Recover a schema from an Eloquent model directly (for controllers that
+     * return a model rather than a Resource): its `@property` docblock gives the
+     * column list (typically from laravel-ide-helper) and `$casts` refine the
+     * types. Degrades to a plain object when neither is available.
+     *
+     * @return array<string, mixed>
+     */
+    public function extractModel(string $modelClass): array
+    {
+        if (! is_subclass_of($modelClass, Model::class)) {
+            return self::OBJECT;
+        }
+
+        $properties = $this->modelDocProps($modelClass);
+
+        $previousCasts = $this->currentCasts;
+        $this->currentCasts = $this->modelCasts($modelClass);
+        foreach (array_keys($this->currentCasts) as $name) {
+            if (($schema = $this->castSchema($name)) !== null) {
+                $properties[$name] = $schema;
+            }
+        }
+        $this->currentCasts = $previousCasts;
+
+        return $properties === [] ? self::OBJECT : ['type' => 'object', 'properties' => $properties];
+    }
+
+    /**
      * @return array<string, array<string, mixed>>
      */
     private function properties(Node\Expr\Array_ $array, int $depth): array

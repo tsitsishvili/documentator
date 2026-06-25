@@ -20,17 +20,24 @@ final class RuleParser
     public static function parse(array $rules): array
     {
         $root = ['type' => 'object', 'properties' => [], 'required' => []];
+        $confirmed = [];
 
         foreach ($rules as $field => $ruleset) {
             if (! is_string($field)) {
                 continue;
             }
-            self::insert($root, explode('.', $field), self::ruleList($ruleset));
+            $list = self::ruleList($ruleset);
+            self::insert($root, explode('.', $field), $list);
+
+            // `confirmed` makes Laravel expect a matching `{field}_confirmation`.
+            if (! str_contains($field, '.') && self::has($list, 'confirmed')) {
+                $confirmed[] = $field;
+            }
         }
 
         $params = [];
         foreach ($root['properties'] as $name => $schema) {
-            $params[] = new ParameterData(
+            $params[$name] = new ParameterData(
                 name: $name,
                 type: $schema['type'] ?? 'string',
                 required: in_array($name, $root['required'], true),
@@ -38,7 +45,22 @@ final class RuleParser
             );
         }
 
-        return $params;
+        foreach ($confirmed as $field) {
+            $name = $field.'_confirmation';
+            if (! isset($params[$field]) || isset($params[$name])) {
+                continue;
+            }
+            $base = $params[$field];
+            $params[$name] = new ParameterData(
+                name: $name,
+                type: $base->type,
+                required: $base->required,
+                description: "Confirmation of the `{$field}` field; must match.",
+                schema: $base->schema,
+            );
+        }
+
+        return array_values($params);
     }
 
     /**
@@ -143,13 +165,25 @@ final class RuleParser
     private static function scalar(array $rules): array
     {
         $type = self::typeFor($rules);
+        $enum = self::enumFor($rules);
+
+        // An all-numeric enum (e.g. an int-backed PHP enum via Rule::enum) is an
+        // integer, not a string of digits.
+        if ($enum !== null && $type === 'string' && self::allNumeric($enum)) {
+            $type = 'integer';
+            $enum = array_map(static fn (string $value) => (int) $value, $enum);
+        }
+
         $schema = ['type' => $type];
 
         if ($format = self::formatFor($rules)) {
             $schema['format'] = $format;
         }
-        if ($enum = self::enumFor($rules)) {
+        if ($enum !== null) {
             $schema['enum'] = $enum;
+        }
+        if ($pattern = self::pattern($rules)) {
+            $schema['pattern'] = $pattern;
         }
 
         [$min, $max] = self::bounds($rules);
@@ -184,16 +218,27 @@ final class RuleParser
     }
 
     /**
-     * Normalise a rule definition into a list of raw rule strings, dropping the
-     * rule objects / closures we can't read statically.
+     * Normalise a rule definition into a list of raw rule strings. A `|`-delimited
+     * string is split; rule objects (e.g. `Rule::in()`, `Rule::enum()`) are kept
+     * by casting to their string form (`in:"a","b"`) since the FormRequest is
+     * instantiated before rules() is read; closures and anything else are dropped.
      *
      * @return array<int, string>
      */
     private static function ruleList(mixed $ruleset): array
     {
-        $raw = is_string($ruleset) ? explode('|', $ruleset) : (is_array($ruleset) ? $ruleset : []);
+        $raw = is_string($ruleset) ? explode('|', $ruleset) : (is_array($ruleset) ? $ruleset : [$ruleset]);
 
-        return array_values(array_filter($raw, 'is_string'));
+        $rules = [];
+        foreach ($raw as $rule) {
+            if (is_string($rule)) {
+                $rules[] = $rule;
+            } elseif (is_object($rule) && method_exists($rule, '__toString')) {
+                $rules[] = (string) $rule;
+            }
+        }
+
+        return $rules;
     }
 
     /**
@@ -231,12 +276,47 @@ final class RuleParser
     private static function typeFor(array $rules): string
     {
         return match (true) {
-            self::has($rules, 'integer') => 'integer',
+            self::has($rules, 'integer'), self::has($rules, 'digits'), self::has($rules, 'digits_between') => 'integer',
             self::has($rules, 'numeric'), self::has($rules, 'decimal') => 'number',
             self::has($rules, 'boolean'), self::has($rules, 'bool') => 'boolean',
             self::has($rules, 'array') => 'array',
             default => 'string',
         };
+    }
+
+    /**
+     * The ECMA pattern for a `regex:` rule, with the PHP delimiters/flags peeled
+     * off so it's a valid JSON Schema `pattern`.
+     *
+     * @param  array<int, string>  $rules
+     */
+    private static function pattern(array $rules): ?string
+    {
+        $regex = self::arg($rules, 'regex');
+
+        if ($regex === null) {
+            return null;
+        }
+
+        return preg_match('#^/(.*)/[a-zA-Z]*$#s', $regex, $matches) === 1 ? $matches[1] : $regex;
+    }
+
+    /**
+     * @param  array<int, string|int>  $values
+     */
+    private static function allNumeric(array $values): bool
+    {
+        if ($values === []) {
+            return false;
+        }
+
+        foreach ($values as $value) {
+            if (! is_numeric($value)) {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     /**

@@ -1,0 +1,99 @@
+# Contributing
+
+Thanks for taking the time to contribute to `tsitsishvili/documentator`! This
+package auto-generates interactive API documentation for Laravel. The notes below
+should get you productive quickly.
+
+## What this is
+
+A **Laravel package**, not an application. There is no host app in the repo — it
+is exercised through tests using [Orchestra Testbench](https://github.com/orchestral/testbench),
+which boots a minimal Laravel instance. Targets **PHP 8.2+** and **Laravel 12/13**.
+
+## Getting started
+
+```bash
+git clone https://github.com/tsitsishvili/documentator.git
+cd documentator
+composer install
+composer test    # make sure the suite is green before you change anything
+```
+
+## Development workflow
+
+```bash
+composer test                              # run the full Pest suite
+vendor/bin/pest --filter=GeneratesOpenApi  # run a single test file / case
+composer lint                              # apply Laravel Pint formatting
+composer lint:test                         # check formatting without writing (CI mode)
+```
+
+There is no build step. Before opening a pull request, make sure **both
+`composer test` and `composer lint:test` pass**.
+
+## How the package is structured
+
+The flow is a linear pipeline:
+
+```
+RouteCollector → ExtractorPipeline (ordered strategies) → OpenApiGenerator → docs UI
+```
+
+- **`src/Extraction/Strategies/`** — each strategy enriches one `EndpointData`.
+  **Order matters**: inference strategies fill gaps non-destructively (`??=`) and
+  `ExtractAttributes` runs **last** so explicit PHP attributes always win.
+- **`src/OpenApi/`** — `OpenApiGenerator` (pure transform to an OpenAPI 3.1 array),
+  `ResourceSchemaExtractor` / `DataObjectSchema` (response schemas), `SchemaSampler`.
+- **`src/Attributes/`** — the override attributes, each read only by `ExtractAttributes`.
+- **`src/Commands/`** — `generate`, `export`, `postman`, `check`.
+- **`config/documentator.php`** — all runtime toggles.
+
+See [`CLAUDE.md`](CLAUDE.md) for a deeper architecture tour.
+
+### Adding a new inference source
+
+1. Add a strategy class in `src/Extraction/Strategies/` implementing `ExtractionStrategy`.
+2. Register it in the `ExtractorPipeline` binding in
+   `DocumentatorServiceProvider::register()`, **before `ExtractAttributes`** so it
+   stays overridable.
+3. Fill gaps with `??=` — never overwrite a value another strategy set.
+
+### Adding a new attribute
+
+Create the attribute class in `src/Attributes/` **and** handle it in
+`ExtractAttributes`. Repeatable attributes carry `Attribute::IS_REPEATABLE`.
+
+## Coding conventions
+
+Full details are in [CODING_STANDARDS.md](CODING_STANDARDS.md). The essentials:
+
+- `declare(strict_types=1)` at the top of every file.
+- Classes are `final` and namespaced under `Tsitsishvili\Documentator\` (PSR-4 → `src/`).
+- Formatting is enforced by **Laravel Pint** — run `composer lint` before committing.
+- **Generation must never throw on one bad route.** Anything that can't be
+  evaluated statically (a `rules()` that needs request state, an unreadable
+  Resource) should be wrapped in `try/catch` and skipped, degrading to a safe
+  default rather than breaking the whole document.
+
+## Tests
+
+- Add tests under `tests/Feature/`.
+- Define throwaway controllers / FormRequests / Resources / models / Data objects
+  at the top of the test file.
+- Use real `[Controller::class, 'method']` routes — **closure routes skip the
+  reflection-based strategies**, so they won't exercise extraction.
+- Every behavior change or bug fix should come with a test.
+
+## Pull requests
+
+- Branch off `main`; keep each PR focused on a single change.
+- Update the **[Unreleased]** section of [`CHANGELOG.md`](CHANGELOG.md) and the
+  `README.md` / `config/documentator.php` when you add or change behavior.
+- Follow Semantic Versioning when describing the impact: bug fix = patch,
+  backward-compatible feature = minor, breaking change = major.
+
+## Reporting issues
+
+Open an issue with the Laravel and PHP versions, a minimal route/controller that
+reproduces the problem, and the OpenAPI output you got versus what you expected.
+Security issues should be reported privately rather than via a public issue.

@@ -33,10 +33,30 @@ final class SchemaSampler
                 $schema['properties'] ?? [],
             ),
             'array' => [self::sample($schema['items'] ?? [], $depth + 1)],
-            'integer', 'number' => 0,
+            'integer' => (int) ($schema['minimum'] ?? 1),
+            'number' => (float) ($schema['minimum'] ?? 1),
             'boolean' => true,
-            'string' => ($schema['format'] ?? null) === 'date-time' ? '2026-01-01T00:00:00Z' : 'string',
+            'string' => self::string($schema),
             default => null,
+        };
+    }
+
+    /**
+     * A representative string value, refined by the schema's `format`.
+     *
+     * @param  array<string, mixed>  $schema
+     */
+    private static function string(array $schema): string
+    {
+        return match ($schema['format'] ?? null) {
+            'email' => 'user@example.com',
+            'uuid' => '9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d',
+            'uri', 'url' => 'https://example.com',
+            'ipv4' => '127.0.0.1',
+            'date-time' => '2026-01-01T00:00:00Z',
+            'date' => '2026-01-01',
+            'binary' => '',
+            default => 'string',
         };
     }
 }

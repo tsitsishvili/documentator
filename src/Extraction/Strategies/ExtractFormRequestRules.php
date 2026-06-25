@@ -44,8 +44,18 @@ final class ExtractFormRequestRules implements ExtractionStrategy
             return $endpoint;
         }
 
+        // GET/HEAD requests carry no body: their validated input arrives as query
+        // string parameters, so document it there rather than as a request body
+        // (which OpenAPI clients ignore for these verbs).
+        $verbs = $endpoint->verbs();
+        $readOnly = $verbs !== [] && array_diff($verbs, ['get', 'head']) === [];
+
         foreach (RuleParser::parse($rules) as $param) {
-            $endpoint->bodyParameters[$param->name] ??= $param;
+            if ($readOnly) {
+                $endpoint->queryParameters[$param->name] ??= $param;
+            } else {
+                $endpoint->bodyParameters[$param->name] ??= $param;
+            }
         }
 
         return $endpoint;

@@ -6,12 +6,15 @@ namespace Tsitsishvili\Documentator;
 
 use Illuminate\Contracts\Routing\Registrar as Router;
 use Illuminate\Support\ServiceProvider;
+use Tsitsishvili\Documentator\Commands\CheckCommand;
 use Tsitsishvili\Documentator\Commands\ExportCommand;
 use Tsitsishvili\Documentator\Commands\GenerateCommand;
 use Tsitsishvili\Documentator\Commands\PostmanCommand;
 use Tsitsishvili\Documentator\Extraction\ExtractorPipeline;
 use Tsitsishvili\Documentator\Extraction\RouteCollector;
 use Tsitsishvili\Documentator\Extraction\Strategies\ExtractAttributes;
+use Tsitsishvili\Documentator\Extraction\Strategies\ExtractDataObjects;
+use Tsitsishvili\Documentator\Extraction\Strategies\ExtractErrorResponses;
 use Tsitsishvili\Documentator\Extraction\Strategies\ExtractFormRequestRules;
 use Tsitsishvili\Documentator\Extraction\Strategies\ExtractResponses;
 use Tsitsishvili\Documentator\Extraction\Strategies\ExtractRouteMetadata;
@@ -42,7 +45,9 @@ final class DocumentatorServiceProvider extends ServiceProvider
             return new ExtractorPipeline([
                 $app->make(ExtractRouteMetadata::class),
                 $app->make(ExtractFormRequestRules::class),
+                $app->make(ExtractDataObjects::class),
                 $app->make(ExtractResponses::class),
+                $app->make(ExtractErrorResponses::class),
                 $app->make(ExtractAttributes::class),
             ]);
         });
@@ -62,7 +67,7 @@ final class DocumentatorServiceProvider extends ServiceProvider
         $this->registerRoutes($this->app->make('router'));
 
         if ($this->app->runningInConsole()) {
-            $this->commands([GenerateCommand::class, ExportCommand::class, PostmanCommand::class]);
+            $this->commands([GenerateCommand::class, ExportCommand::class, PostmanCommand::class, CheckCommand::class]);
 
             $this->publishes([
                 __DIR__.'/../config/documentator.php' => $this->app->configPath('documentator.php'),

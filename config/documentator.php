@@ -117,6 +117,50 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Inferred error responses
+    |--------------------------------------------------------------------------
+    |
+    | Adds the conventional error responses an endpoint can return based on its
+    | shape, so you don't have to declare each one: 422 when a FormRequest
+    | validates the body, 401 when the endpoint requires authentication, 403
+    | when a FormRequest overrides authorize(), and 404 when the route binds a
+    | model. Explicit #[Response] attributes always override these. Set false to
+    | document only the responses you declare.
+    |
+    */
+
+    'error_responses' => env('DOCUMENTATOR_ERROR_RESPONSES', true),
+
+    /*
+    |--------------------------------------------------------------------------
+    | Inferred success status codes
+    |--------------------------------------------------------------------------
+    |
+    | Picks a conventional success status from the HTTP verb instead of always
+    | documenting 200: POST -> 201 Created, DELETE -> 204 No Content. An explicit
+    | #[Response] attribute always overrides this. Set false to keep every
+    | inferred success response at 200.
+    |
+    */
+
+    'infer_status_codes' => env('DOCUMENTATOR_STATUS_CODES', true),
+
+    /*
+    |--------------------------------------------------------------------------
+    | Generated examples
+    |--------------------------------------------------------------------------
+    |
+    | Seeds a representative example for every request body and parameter that
+    | doesn't declare one, derived from its type/format/enum (e.g. an email field
+    | -> user@example.com). This prefills the "Try it" playground. An explicit
+    | example always wins. Set false to emit only the examples you declare.
+    |
+    */
+
+    'generate_examples' => env('DOCUMENTATOR_EXAMPLES', true),
+
+    /*
+    |--------------------------------------------------------------------------
     | Authentication schemes
     |--------------------------------------------------------------------------
     |

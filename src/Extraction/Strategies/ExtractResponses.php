@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Tsitsishvili\Documentator\Extraction\Strategies;
 
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Resources\Json\JsonResource;
 use Illuminate\Http\Resources\Json\ResourceCollection;
 use Illuminate\Routing\Route;
@@ -41,23 +42,47 @@ final class ExtractResponses implements ExtractionStrategy
 
         $class = $returnType->getName();
 
+        // A body-bearing success is 200 unless the verb conventionally creates
+        // (POST -> 201); a 204 is reserved for the empty-body fallback.
+        $status = in_array('post', $endpoint->verbs(), true) && $this->infersStatus() ? 201 : 200;
+
         if (is_subclass_of($class, ResourceCollection::class)) {
-            $endpoint->responses[200] ??= new ResponseData(
-                status: 200,
-                description: 'Successful response',
+            $endpoint->responses[$status] ??= new ResponseData(
+                status: $status,
+                description: $this->describe($status),
                 resource: $class,
                 schema: PaginationSchema::paginated($this->collectsSchema($class)),
             );
+
+            foreach (PaginationSchema::queryParameters() as $name => $param) {
+                $endpoint->queryParameters[$name] ??= $param;
+            }
         } elseif (is_subclass_of($class, JsonResource::class)) {
-            $endpoint->responses[200] ??= new ResponseData(
-                status: 200,
-                description: 'Successful response',
+            $endpoint->responses[$status] ??= new ResponseData(
+                status: $status,
+                description: $this->describe($status),
                 resource: $class,
                 schema: $this->schemas->extract($class),
+            );
+        } elseif (is_subclass_of($class, Model::class)) {
+            $endpoint->responses[$status] ??= new ResponseData(
+                status: $status,
+                description: $this->describe($status),
+                schema: $this->schemas->extractModel($class),
             );
         }
 
         return $endpoint;
+    }
+
+    private function infersStatus(): bool
+    {
+        return (bool) config('documentator.infer_status_codes', true);
+    }
+
+    private function describe(int $status): string
+    {
+        return $status === 201 ? 'Created' : 'Successful response';
     }
 
     /**

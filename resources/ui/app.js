@@ -39,13 +39,85 @@
         return String(Math.floor(code / 100));
     }
 
-    function schemaType(schema) {
-        if (!schema) return 'any';
-        if (schema.type === 'array') return (schema.items && schema.items.type ? schema.items.type : 'any') + '[]';
-        return schema.type || 'object';
+    /* The non-null members of an OpenAPI 3.1 type (which may be a union array). */
+    function typesOf(schema) {
+        if (!schema) return [];
+        var t = schema.type;
+        if (Array.isArray(t)) return t.filter(function (x) { return x !== 'null'; });
+        return t ? [t] : [];
     }
 
-    /* Remember the auth token + server per docs page. */
+    function isNullable(schema) {
+        if (!schema) return false;
+        if (schema.nullable) return true;
+        return Array.isArray(schema.type) && schema.type.indexOf('null') !== -1;
+    }
+
+    /* A human label covering every shape OpenAPI can describe. */
+    function schemaType(schema) {
+        if (!schema) return 'any';
+        if (schema.oneOf || schema.anyOf) {
+            return (schema.oneOf || schema.anyOf).map(schemaType).join(' | ') || 'any';
+        }
+        if (schema.allOf) return 'object';
+        var types = typesOf(schema);
+        if (types.length > 1) return types.map(function (t) { return one(t, schema); }).join(' | ');
+        return one(types[0], schema);
+    }
+
+    function one(type, schema) {
+        if (type === 'array') {
+            return (schema.items ? schemaType(schema.items) : 'any') + '[]';
+        }
+        var base = type || (schema.properties ? 'object' : (schema.enum ? 'string' : 'any'));
+        if (schema.format) base += '<' + schema.format + '>';
+        return base;
+    }
+
+    function isFileSchema(schema) {
+        if (!schema) return false;
+        if (schema.format === 'binary') return true;
+        return schema.type === 'array' && schema.items && schema.items.format === 'binary';
+    }
+
+    /* The request body media type + schema we should drive the console from. */
+    function requestBodyContent(op) {
+        var rb = op && op.requestBody;
+        if (!rb || !rb.content) return null;
+        var c = rb.content;
+        var mediaType = c['multipart/form-data'] ? 'multipart/form-data'
+            : c['application/json'] ? 'application/json'
+            : Object.keys(c)[0];
+        if (!mediaType) return null;
+        return { mediaType: mediaType, schema: c[mediaType].schema, required: !!rb.required };
+    }
+
+    function responseMedia(response) {
+        if (!response || !response.content) return null;
+        var c = response.content;
+        return c['application/json'] || c[Object.keys(c)[0]] || null;
+    }
+
+    function responseSchema(response) {
+        var media = responseMedia(response);
+        return media && media.schema ? media.schema : null;
+    }
+
+    /* A concrete example for a response, from `example`, the first of `examples`,
+       or the schema's own `example`. Returns undefined when there is none. */
+    function responseExample(response) {
+        var media = responseMedia(response);
+        if (!media) return undefined;
+        if (media.example !== undefined) return media.example;
+        if (media.examples) {
+            var first = media.examples[Object.keys(media.examples)[0]];
+            if (first && first.value !== undefined) return first.value;
+        }
+        if (media.schema && media.schema.example !== undefined) return media.schema.example;
+        return undefined;
+    }
+
+    /* Remember the server (+ auth tokens, keyed by scheme) per docs page. */
     var store = {
         k: function (name) { return 'documentator:' + location.pathname + ':' + name; },
         get: function (name) { try { return localStorage.getItem(this.k(name)); } catch (e) { return null; } },
@@ -85,7 +157,10 @@
         depth = depth || 0;
         if (!schema || depth > 6) return null;
         if (schema.example !== undefined) return schema.example;
-        switch (schema.type) {
+        if (schema.enum && schema.enum.length) return schema.enum[0];
+        if (schema.oneOf || schema.anyOf) return sample((schema.oneOf || schema.anyOf)[0], depth);
+        var type = typesOf(schema)[0] || (schema.properties ? 'object' : null);
+        switch (type) {
             case 'object':
                 var obj = {};
                 var props = schema.properties || {};
@@ -99,7 +174,15 @@
             case 'boolean':
                 return true;
             case 'string':
-                return schema.format === 'date-time' ? '2026-01-01T00:00:00Z' : 'string';
+                switch (schema.format) {
+                    case 'date-time': return '2026-01-01T00:00:00Z';
+                    case 'date': return '2026-01-01';
+                    case 'email': return 'user@example.com';
+                    case 'uuid': return '00000000-0000-0000-0000-000000000000';
+                    case 'uri': return 'https://example.com';
+                    case 'binary': return '';
+                    default: return 'string';
+                }
             default:
                 return null;
         }
@@ -143,12 +226,53 @@
         return order.map(function (tag) { return { tag: tag, items: byTag[tag] }; });
     }
 
+    /* ---------- security ---------- */
+
+    function securitySchemes() {
+        return (state.spec.components && state.spec.components.securitySchemes) || {};
+    }
+    function hasSecuritySchemes() {
+        return Object.keys(securitySchemes()).length > 0;
+    }
+
     function authForOp(op) {
         if (!op.security || !op.security.length) return null;
         var key = Object.keys(op.security[0] || {})[0];
         if (!key) return null;
-        var schemes = (state.spec.components && state.spec.components.securitySchemes) || {};
-        return { key: key, scheme: schemes[key] || { type: 'http', scheme: 'bearer' } };
+        return { key: key, scheme: securitySchemes()[key] || { type: 'http', scheme: 'bearer' } };
+    }
+
+    /* Tokens are stored per scheme; fall back to the legacy single-token key. */
+    function authToken(key) { return store.get('auth:' + key) || store.get('auth') || ''; }
+    function setAuthToken(key, value) { store.set('auth:' + key, value || ''); }
+    function anyAuthorized() {
+        return Object.keys(securitySchemes()).some(function (k) { return !!authToken(k); });
+    }
+
+    function authLabel(scheme) {
+        scheme = scheme || {};
+        if (scheme.type === 'apiKey') return scheme.name || 'API key';
+        if (scheme.scheme === 'basic') return 'base64(user:password)';
+        return 'Bearer token';
+    }
+    function authHint(scheme) {
+        scheme = scheme || {};
+        if (scheme.type === 'apiKey') return 'apiKey · ' + (scheme.in || 'header') + (scheme.name ? ' · ' + scheme.name : '');
+        if (scheme.type === 'http') return 'http · ' + (scheme.scheme || 'bearer');
+        if (scheme.type === 'oauth2') return 'oauth2';
+        return scheme.type || 'http';
+    }
+
+    /* Put the token where its scheme says it belongs (query is handled by the caller). */
+    function applyAuthHeader(headers, scheme, token) {
+        scheme = scheme || {};
+        if (scheme.type === 'apiKey' && scheme.in === 'header') {
+            headers[scheme.name || 'X-API-Key'] = token;
+        } else if (scheme.scheme === 'basic') {
+            headers.Authorization = 'Basic ' + token;
+        } else {
+            headers.Authorization = 'Bearer ' + token;
+        }
     }
 
     function pathSegments(path) {
@@ -170,12 +294,17 @@
         app.innerHTML = '';
 
         var version = info.version ? '<span class="topbar__version">v' + esc(info.version) + '</span>' : '';
+        var authBtn = hasSecuritySchemes()
+            ? '<button class="topbar__auth" id="authBtn" type="button">&#128275; Authorize</button>'
+            : '';
         app.appendChild(el(
             '<header class="topbar">' +
                 '<button class="topbar__menu" id="menuBtn" aria-label="Toggle navigation">&#9776;</button>' +
                 '<div class="topbar__brand"><b>{ }</b>' + esc(info.title || cfg.title || 'API') + '</div>' +
                 version +
-                '<a class="topbar__spec" href="' + esc(cfg.specUrl) + '" target="_blank" rel="noopener">openapi.json &#8599;</a>' +
+                '<div class="topbar__actions">' + authBtn +
+                    '<a class="topbar__spec" href="' + esc(cfg.specUrl) + '" target="_blank" rel="noopener">openapi.json &#8599;</a>' +
+                '</div>' +
             '</header>'
         ));
 
@@ -197,8 +326,10 @@
             '</div>'
         ));
         app.appendChild(el('<div class="scrim" id="scrim"></div>'));
+        if (hasSecuritySchemes()) app.appendChild(el(authModalHtml()));
 
         wireShell();
+        updateAuthButton();
         renderNav('');
         applyHash();
     }
@@ -220,7 +351,19 @@
         document.getElementById('consoleClose').addEventListener('click', function () { close(consoleEl, scrim); });
         scrim.addEventListener('click', function () { close(sidebar, scrim); close(consoleEl, scrim); });
 
-        document.getElementById('consoleForm').addEventListener('input', onFormInput);
+        var form = document.getElementById('consoleForm');
+        form.addEventListener('input', onFormInput);
+        form.addEventListener('change', updateSnippet); // selects + file pickers
+
+        var authBtn = document.getElementById('authBtn');
+        if (authBtn) authBtn.addEventListener('click', openAuth);
+        var authModal = document.getElementById('authModal');
+        if (authModal) {
+            document.getElementById('authModalClose').addEventListener('click', closeAuth);
+            document.getElementById('authSave').addEventListener('click', saveAuth);
+            document.getElementById('authClear').addEventListener('click', clearAuth);
+            authModal.addEventListener('click', function (e) { if (e.target === authModal) closeAuth(); });
+        }
 
         window.addEventListener('hashchange', applyHash);
         document.addEventListener('keydown', onKeydown);
@@ -228,10 +371,7 @@
 
     function onFormInput(e) {
         var t = e.target;
-        if (t && t.dataset) {
-            if (t.dataset.kind === 'auth') store.set('auth', t.value);
-            if (t.dataset.kind === 'server') store.set('server', t.value);
-        }
+        if (t && t.dataset && t.dataset.kind === 'server') store.set('server', t.value);
         updateSnippet();
     }
 
@@ -245,6 +385,7 @@
             if (state.currentId) send();
         } else if (e.key === 'Escape') {
             var scrim = document.getElementById('scrim');
+            closeAuth();
             close(document.getElementById('sidebar'), scrim);
             close(document.getElementById('console'), scrim);
         }
@@ -257,6 +398,69 @@
     function close(panel, scrim) {
         panel.removeAttribute('data-open');
         if (!document.querySelector('[data-open]')) scrim.removeAttribute('data-show');
+    }
+
+    /* ---------- authorize modal ---------- */
+
+    function authModalHtml() {
+        var schemes = securitySchemes();
+        var rows = Object.keys(schemes).map(function (key) {
+            var s = schemes[key] || {};
+            return '<div class="authmodal__scheme">' +
+                '<div class="authmodal__name">' + esc(key) +
+                    '<span class="authmodal__kind">' + esc(authHint(s)) + '</span></div>' +
+                '<input class="input" type="text" data-auth-scheme="' + esc(key) + '" ' +
+                    'value="' + esc(authToken(key)) + '" placeholder="' + esc(authLabel(s)) + '" autocomplete="off">' +
+            '</div>';
+        }).join('');
+
+        return '<div class="modal" id="authModal" hidden>' +
+            '<div class="modal__card" role="dialog" aria-modal="true" aria-label="Authorize">' +
+                '<div class="modal__head"><span>&#128274; Authorize</span>' +
+                    '<button class="modal__close" id="authModalClose" type="button" aria-label="Close">&#10005;</button></div>' +
+                '<div class="modal__body">' + rows + '</div>' +
+                '<div class="modal__foot">' +
+                    '<button class="btn-ghost" id="authClear" type="button">Clear all</button>' +
+                    '<button class="btn-primary" id="authSave" type="button">Save</button>' +
+                '</div>' +
+            '</div></div>';
+    }
+
+    function openAuth() {
+        var m = document.getElementById('authModal');
+        if (!m) return;
+        m.querySelectorAll('[data-auth-scheme]').forEach(function (i) { i.value = authToken(i.dataset.authScheme); });
+        m.removeAttribute('hidden');
+        var first = m.querySelector('[data-auth-scheme]');
+        if (first) first.focus();
+    }
+    function closeAuth() {
+        var m = document.getElementById('authModal');
+        if (m) m.setAttribute('hidden', '');
+    }
+    function saveAuth() {
+        var m = document.getElementById('authModal');
+        if (!m) return;
+        m.querySelectorAll('[data-auth-scheme]').forEach(function (i) { setAuthToken(i.dataset.authScheme, i.value); });
+        afterAuthChange();
+        closeAuth();
+    }
+    function clearAuth() {
+        var m = document.getElementById('authModal');
+        if (!m) return;
+        m.querySelectorAll('[data-auth-scheme]').forEach(function (i) { i.value = ''; setAuthToken(i.dataset.authScheme, ''); });
+        afterAuthChange();
+    }
+    function afterAuthChange() {
+        updateAuthButton();
+        if (state.currentId) renderConsole(entryById(state.currentId));
+    }
+    function updateAuthButton() {
+        var btn = document.getElementById('authBtn');
+        if (!btn) return;
+        var on = anyAuthorized();
+        btn.classList.toggle('is-on', on);
+        btn.innerHTML = on ? '&#128274; Authorized' : '&#128275; Authorize';
     }
 
     /* ---------- navigation ---------- */
@@ -315,20 +519,55 @@
         }
     }
 
-    function rowsFromSchema(schema, nested) {
-        if (!schema || !schema.properties) return '';
+    /* A field table for any object/array schema; recurses into nested shapes. */
+    function rowsFromSchema(schema) {
+        if (!schema) return '';
+        if (schema.type === 'array' && schema.items) {
+            if (schema.items.properties) return rowsFromSchema(schema.items);
+            return '<div class="row"><div class="row__name">items</div>' +
+                '<div class="row__type"><b>' + esc(schemaType(schema.items)) + '</b></div></div>';
+        }
+        if (!schema.properties) return '';
         var required = schema.required || [];
         return Object.keys(schema.properties).map(function (name) {
-            var prop = schema.properties[name];
+            var prop = schema.properties[name] || {};
             var req = required.indexOf(name) !== -1 ? '<span class="row__req">required</span>' : '';
+
+            var meta = [];
+            if (prop.enum) meta.push('enum');
+            if (isNullable(prop)) meta.push('nullable');
+            var metaNote = meta.length ? ' · ' + meta.join(' · ') : '';
+
             var desc = prop.description ? '<div class="row__desc">' + inline(prop.description) + '</div>' : '';
-            var children = (prop.type === 'object' && prop.properties) ? rowsFromSchema(prop, true)
-                : (prop.type === 'array' && prop.items && prop.items.properties) ? rowsFromSchema(prop.items, true) : '';
+            var enumList = prop.enum
+                ? '<div class="row__enum">' + prop.enum.map(function (v) { return '<code>' + esc(v) + '</code>'; }).join(' ') + '</div>'
+                : '';
+
+            var children = (prop.type === 'object' && prop.properties) ? rowsFromSchema(prop)
+                : (prop.type === 'array' && prop.items && prop.items.properties) ? rowsFromSchema(prop.items) : '';
             var childWrap = children ? '<div class="row--nested">' + children + '</div>' : '';
-            var enumNote = prop.enum ? ' · enum' : '';
+
             return '<div class="row"><div class="row__name">' + esc(name) + req + '</div>' +
-                '<div class="row__type"><b>' + esc(schemaType(prop)) + '</b>' + enumNote + '</div>' + desc + '</div>' + childWrap;
+                '<div class="row__type"><b>' + esc(schemaType(prop)) + '</b>' + metaNote + '</div>' +
+                desc + enumList + '</div>' + childWrap;
         }).join('');
+    }
+
+    function schemaSection(title, schema, mediaNote) {
+        var rows = rowsFromSchema(schema);
+        var body = rows || '<p class="row__desc">' + esc(schemaType(schema)) + '</p>';
+        var note = mediaNote ? '<span class="spec-section__media">' + esc(mediaNote) + '</span>' : '';
+        return '<section class="spec-section"><h2 class="spec-section__title">' + esc(title) + note + '</h2>' + body + '</section>';
+    }
+
+    /* A pretty-printed, syntax-highlighted example value (escape-first, like the
+       try-it response pane). Used when a response has no schema to tabulate. */
+    function exampleBlock(value) {
+        var json;
+        try { json = JSON.stringify(value, null, 2); } catch (e) { /* circular, fall through */ }
+        if (json === undefined) json = String(value);
+        return '<div class="response-block__caption">Example</div>' +
+            '<pre class="example-code">' + highlightJson(esc(json)) + '</pre>';
     }
 
     function renderDoc(entry) {
@@ -348,18 +587,24 @@
             html += '<section class="spec-section"><h2 class="spec-section__title">Parameters</h2>';
             html += params.map(function (p) {
                 var req = p.required ? '<span class="row__req">required</span>' : '';
-                var loc = '<b>' + esc(schemaType(p.schema)) + '</b> · ' + esc(p.in);
+                var meta = [];
+                if (p.schema && p.schema.enum) meta.push('enum');
+                if (isNullable(p.schema)) meta.push('nullable');
+                var loc = '<b>' + esc(schemaType(p.schema)) + '</b> · ' + esc(p.in) + (meta.length ? ' · ' + meta.join(' · ') : '');
                 var desc = p.description ? '<div class="row__desc">' + inline(p.description) + '</div>' : '';
-                return '<div class="row"><div class="row__name">' + esc(p.name) + req + '</div><div class="row__type">' + loc + '</div>' + desc + '</div>';
+                var enumList = (p.schema && p.schema.enum)
+                    ? '<div class="row__enum">' + p.schema.enum.map(function (v) { return '<code>' + esc(v) + '</code>'; }).join(' ') + '</div>'
+                    : '';
+                return '<div class="row"><div class="row__name">' + esc(p.name) + req + '</div>' +
+                    '<div class="row__type">' + loc + '</div>' + desc + enumList + '</div>';
             }).join('');
             html += '</section>';
         }
 
-        var bodySchema = op.requestBody && op.requestBody.content && op.requestBody.content['application/json'] &&
-            op.requestBody.content['application/json'].schema;
-        if (bodySchema) {
-            html += '<section class="spec-section"><h2 class="spec-section__title">Request body</h2>' +
-                (rowsFromSchema(bodySchema) || '<p class="row__desc">' + esc(schemaType(bodySchema)) + '</p>') + '</section>';
+        var content = requestBodyContent(op);
+        if (content && content.schema) {
+            var mediaNote = content.mediaType === 'application/json' ? null : content.mediaType;
+            html += schemaSection('Request body', content.schema, mediaNote);
         }
 
         var responses = op.responses || {};
@@ -368,8 +613,21 @@
             html += '<section class="spec-section"><h2 class="spec-section__title">Responses</h2>';
             html += codes.map(function (code) {
                 var r = responses[code] || {};
-                return '<div class="response-row"><span class="status-pill" data-class="' + statusClass(+code) + '">' + esc(code) +
-                    '</span><span class="response-row__desc">' + inline(r.description || '') + '</span></div>';
+                var schema = responseSchema(r);
+                var rows = schema ? rowsFromSchema(schema) : '';
+                var example = responseExample(r);
+                var detail = '';
+                if (rows) {
+                    detail = '<div class="response-block__schema">' + rows + '</div>';
+                } else if (example !== undefined) {
+                    detail = '<div class="response-block__schema response-block__example">' + exampleBlock(example) + '</div>';
+                } else if (schema) {
+                    detail = '<div class="response-block__schema"><p class="row__desc">' + esc(schemaType(schema)) + '</p></div>';
+                }
+                return '<div class="response-block">' +
+                    '<div class="response-row"><span class="status-pill" data-class="' + statusClass(+code) + '">' + esc(code) +
+                    '</span><span class="response-row__desc">' + inline(r.description || '') + '</span></div>' +
+                    detail + '</div>';
             }).join('');
             html += '</section>';
         }
@@ -381,9 +639,41 @@
 
     /* ---------- console ---------- */
 
-    function field(label, controlHtml, required) {
+    function field(label, controlHtml, required, hint) {
         var req = required ? '<span class="req">required</span>' : '';
-        return '<div class="field"><label class="field__label">' + esc(label) + req + '</label>' + controlHtml + '</div>';
+        var note = hint ? '<span class="field__hint">' + esc(hint) + '</span>' : '';
+        return '<div class="field"><label class="field__label">' + esc(label) + req + note + '</label>' + controlHtml + '</div>';
+    }
+
+    /* The right control for one top-level body property, driven by its schema. */
+    function bodyFieldControl(name, schema, required) {
+        var attrs = 'data-kind="body-field" data-name="' + esc(name) + '"';
+        var typeLbl = schemaType(schema);
+        var control;
+
+        if (isFileSchema(schema)) {
+            var multiple = schema.type === 'array' ? ' multiple' : '';
+            control = '<input class="input input--file" type="file" ' + attrs + ' data-ftype="file"' + multiple + '>';
+        } else if (schema.enum) {
+            var opts = ['<option value="">—</option>'].concat(schema.enum.map(function (v) {
+                return '<option value="' + esc(v) + '">' + esc(v) + '</option>';
+            }));
+            control = '<select class="select" ' + attrs + ' data-ftype="enum">' + opts.join('') + '</select>';
+        } else if (typesOf(schema)[0] === 'boolean') {
+            control = '<select class="select" ' + attrs + ' data-ftype="boolean">' +
+                '<option value="">—</option><option value="true">true</option><option value="false">false</option></select>';
+        } else if (typesOf(schema)[0] === 'integer' || typesOf(schema)[0] === 'number') {
+            control = '<input class="input" type="number" ' + attrs + ' data-ftype="number" placeholder="' + esc(typeLbl) + '">';
+        } else if (typesOf(schema)[0] === 'object' || (schema.type === 'array' && schema.items && (schema.items.properties || schema.items.type === 'object'))) {
+            var skeleton = JSON.stringify(sample(schema), null, 2);
+            control = '<textarea class="textarea textarea--sm" ' + attrs + ' data-ftype="json" spellcheck="false">' + esc(skeleton) + '</textarea>';
+        } else if (schema.type === 'array') {
+            control = '<input class="input" ' + attrs + ' data-ftype="csv" placeholder="comma, separated, values">';
+        } else {
+            control = '<input class="input" type="text" ' + attrs + ' data-ftype="text" placeholder="' + esc(typeLbl) + '">';
+        }
+
+        return field(name, control, required, typeLbl);
     }
 
     function renderConsole(entry) {
@@ -399,10 +689,11 @@
 
         var auth = authForOp(op);
         if (auth) {
-            var s = auth.scheme || {};
-            var label = s.type === 'apiKey' ? (s.name || 'API key') : (s.scheme === 'basic' ? 'Basic credentials' : 'Bearer token');
-            html += field(label, '<input class="input" type="text" data-kind="auth" value="' + esc(store.get('auth') || '') +
-                '" placeholder="' + esc(label) + '…" autocomplete="off">');
+            var authed = !!authToken(auth.key);
+            html += '<div class="authstate' + (authed ? ' is-on' : '') + '">' +
+                '<span class="authstate__label">' + (authed ? 'Authorized' : 'Not authorized') + ' · ' + esc(auth.key) + '</span>' +
+                '<button type="button" class="authstate__btn" id="consoleAuthBtn">' + (authed ? 'Edit' : 'Authorize') + '</button>' +
+            '</div>';
         }
 
         var pathParams = pathParamNames(entry.path);
@@ -422,12 +713,19 @@
             }).join('');
         }
 
-        var bodySchema = op.requestBody && op.requestBody.content && op.requestBody.content['application/json'] &&
-            op.requestBody.content['application/json'].schema;
-        if (bodySchema && BODY_METHODS[entry.method]) {
-            var skeleton = JSON.stringify(sample(bodySchema), null, 2);
-            html += '<div class="subhead">Body · JSON</div>';
-            html += '<div class="field"><textarea class="textarea" data-kind="body" spellcheck="false">' + esc(skeleton) + '</textarea></div>';
+        var content = requestBodyContent(op);
+        if (content && content.schema && BODY_METHODS[entry.method]) {
+            var label = content.mediaType === 'multipart/form-data' ? 'Body · form-data' : 'Body · JSON';
+            html += '<div class="subhead">' + label + '</div>';
+            var props = content.schema.properties || {};
+            var keys = Object.keys(props);
+            if (keys.length) {
+                var reqd = content.schema.required || [];
+                html += keys.map(function (name) { return bodyFieldControl(name, props[name] || {}, reqd.indexOf(name) !== -1); }).join('');
+            } else {
+                var skeleton = JSON.stringify(sample(content.schema), null, 2);
+                html += '<div class="field"><textarea class="textarea" data-kind="body-raw" spellcheck="false">' + esc(skeleton) + '</textarea></div>';
+            }
         }
 
         var active = activeLang();
@@ -442,9 +740,61 @@
             '<pre class="snippet__code" id="snippetCode"></pre></div>';
 
         form.innerHTML = html;
+        var consoleAuthBtn = document.getElementById('consoleAuthBtn');
+        if (consoleAuthBtn) consoleAuthBtn.addEventListener('click', openAuth);
         document.getElementById('snippetCopy').addEventListener('click', copySnippet);
         document.getElementById('snippetLangs').addEventListener('click', onLangClick);
         updateSnippet();
+    }
+
+    /* Coerce a raw input value into the JS value its schema type implies. */
+    function coerce(ftype, raw) {
+        switch (ftype) {
+            case 'number': var n = Number(raw); return isNaN(n) ? raw : n;
+            case 'boolean': return raw === 'true';
+            case 'csv': return raw.split(',').map(function (s) { return s.trim(); }).filter(function (s) { return s !== ''; });
+            case 'json': try { return JSON.parse(raw); } catch (e) { return raw; }
+            default: return raw;
+        }
+    }
+
+    /* Read the body fields into a normalized shape the senders/snippets understand:
+       { mode: 'none' | 'json' | 'raw' | 'multipart', ... }. */
+    function readBody(form, content) {
+        var raw = form.querySelector('[data-kind="body-raw"]');
+        if (raw) {
+            var txt = (raw.value || '').trim();
+            if (!txt) return { mode: 'none' };
+            try { return { mode: 'json', value: JSON.parse(txt) }; }
+            catch (e) { return { mode: 'raw', value: raw.value }; }
+        }
+
+        var inputs = form.querySelectorAll('[data-kind="body-field"]');
+        if (!inputs.length) return { mode: 'none' };
+
+        var multipart = content && content.mediaType === 'multipart/form-data';
+        var json = {};
+        var hasJson = false;
+        var fields = [];
+        var files = [];
+
+        Array.prototype.forEach.call(inputs, function (input) {
+            var name = input.dataset.name;
+            if (input.dataset.ftype === 'file') {
+                var names = input.files ? Array.prototype.map.call(input.files, function (f) { return f.name; }) : [];
+                files.push({ name: name, filenames: names });
+                return;
+            }
+            if (input.value === '') return;
+            var val = coerce(input.dataset.ftype, input.value);
+            json[name] = val;
+            hasJson = true;
+            fields.push({ name: name, value: typeof val === 'string' ? val : JSON.stringify(val) });
+        });
+
+        if (multipart) return { mode: 'multipart', fields: fields, files: files };
+        if (!hasJson) return { mode: 'none' };
+        return { mode: 'json', value: json };
     }
 
     function readForm() {
@@ -463,29 +813,37 @@
             if (input.value !== '') query.push(encodeURIComponent(input.dataset.name) + '=' + encodeURIComponent(input.value));
         });
 
-        var url = server.replace(/\/$/, '') + path + (query.length ? '?' + query.join('&') : '');
-
         var headers = { Accept: 'application/json' };
-        var bodyInput = form.querySelector('[data-kind="body"]');
-        if (bodyInput) headers['Content-Type'] = 'application/json';
+        var content = requestBodyContent(entry.op);
+        var body = BODY_METHODS[entry.method] ? readBody(form, content) : { mode: 'none' };
+        if (body.mode === 'json' || body.mode === 'raw') headers['Content-Type'] = 'application/json';
 
-        var authInput = form.querySelector('[data-kind="auth"]');
-        if (authInput && authInput.value) {
-            var auth = authForOp(entry.op);
-            var s = (auth && auth.scheme) || {};
-            if (s.type === 'apiKey' && s.in === 'header') headers[s.name || 'X-API-Key'] = authInput.value;
-            else if (s.scheme === 'basic') headers.Authorization = 'Basic ' + authInput.value;
-            else headers.Authorization = 'Bearer ' + authInput.value;
+        var auth = authForOp(entry.op);
+        if (auth) {
+            var token = authToken(auth.key);
+            var s = auth.scheme || {};
+            if (token) {
+                if (s.type === 'apiKey' && s.in === 'query') {
+                    query.push(encodeURIComponent(s.name || 'api_key') + '=' + encodeURIComponent(token));
+                } else {
+                    applyAuthHeader(headers, s, token);
+                }
+            }
         }
 
-        return { method: entry.method, url: url, headers: headers, body: bodyInput ? bodyInput.value : null };
+        var url = server.replace(/\/$/, '') + path + (query.length ? '?' + query.join('&') : '');
+        return { method: entry.method, url: url, headers: headers, body: body };
     }
 
-    /* req.body is a JSON string; return the parsed value, the raw string when it
-       isn't JSON, or undefined when there's no body. */
-    function parsedBody(req) {
-        if (!req.body) return undefined;
-        try { return JSON.parse(req.body); } catch (e) { return req.body; }
+    /* ---------- snippet generation ---------- */
+
+    function fieldsToObject(fields) {
+        var o = {};
+        fields.forEach(function (f) { o[f.name] = f.value; });
+        return o;
+    }
+    function fileNames(file) {
+        return file.filenames.length ? file.filenames : ['path/to/file'];
     }
 
     /* Indent every line after the first (a literal block sits inside a call). */
@@ -531,7 +889,15 @@
     function buildCurl(req) {
         var parts = ["curl -X " + req.method.toUpperCase() + " '" + req.url + "'"];
         Object.keys(req.headers).forEach(function (k) { parts.push("  -H '" + k + ': ' + req.headers[k] + "'"); });
-        if (req.body) parts.push("  --data '" + req.body.replace(/\n\s*/g, '') + "'");
+        var b = req.body;
+        if (b.mode === 'json') {
+            parts.push("  --data '" + JSON.stringify(b.value) + "'");
+        } else if (b.mode === 'raw') {
+            parts.push("  --data '" + b.value.replace(/\n\s*/g, '') + "'");
+        } else if (b.mode === 'multipart') {
+            b.fields.forEach(function (f) { parts.push("  -F '" + f.name + '=' + String(f.value).replace(/\n\s*/g, '') + "'"); });
+            b.files.forEach(function (f) { fileNames(f).forEach(function (fn) { parts.push("  -F '" + f.name + '=@' + fn + "'"); }); });
+        }
         return parts.join(' \\\n');
     }
 
@@ -539,7 +905,7 @@
         var headers = {};
         Object.keys(req.headers).forEach(function (k) { headers[k] = req.headers[k]; });
         var method = req.method.toLowerCase();
-        var body = parsedBody(req);
+        var b = req.body;
         var url = req.url.replace(/'/g, "\\'");
         var segments = [];
 
@@ -547,56 +913,86 @@
             segments.push("withToken('" + headers.Authorization.slice(7).replace(/'/g, "\\'") + "')");
             delete headers.Authorization;
         }
-        // Passing an array body sets the JSON content type for us.
-        if (body !== undefined && typeof body !== 'string') delete headers['Content-Type'];
-        if (Object.keys(headers).length) {
-            segments.push('withHeaders(' + indentLines(toPhp(headers), '    ') + ')');
-        }
 
-        if (body === undefined) {
-            segments.push(method + "('" + url + "')");
-        } else if (typeof body === 'string') {
-            segments.push("withBody('" + body.replace(/'/g, "\\'") + "', 'application/json')");
-            segments.push(method + "('" + url + "')");
+        if (b.mode === 'multipart') {
+            delete headers['Content-Type'];
+            b.files.forEach(function (f) {
+                var fn = fileNames(f)[0];
+                segments.push("attach('" + f.name + "', file_get_contents('" + fn + "'), '" + fn + "')");
+            });
+            if (Object.keys(headers).length) segments.push('withHeaders(' + indentLines(toPhp(headers), '    ') + ')');
+            segments.push('asMultipart()');
+            segments.push(method + "('" + url + "', " + indentLines(toPhp(fieldsToObject(b.fields)), '    ') + ')');
         } else {
-            segments.push(method + "('" + url + "', " + indentLines(toPhp(body), '    ') + ')');
+            // Passing an array body sets the JSON content type for us.
+            if (b.mode === 'json') delete headers['Content-Type'];
+            if (Object.keys(headers).length) segments.push('withHeaders(' + indentLines(toPhp(headers), '    ') + ')');
+            if (b.mode === 'json') {
+                segments.push(method + "('" + url + "', " + indentLines(toPhp(b.value), '    ') + ')');
+            } else if (b.mode === 'raw') {
+                segments.push("withBody('" + b.value.replace(/'/g, "\\'") + "', 'application/json')");
+                segments.push(method + "('" + url + "')");
+            } else {
+                segments.push(method + "('" + url + "')");
+            }
         }
         return 'use Illuminate\\Support\\Facades\\Http;\n\n$response = Http::' + segments.join('\n    ->') + ';';
     }
 
     function buildJs(req) {
-        var lines = ['const response = await fetch("' + req.url.replace(/"/g, '\\"') + '", {'];
+        var b = req.body;
+        var headers = {};
+        Object.keys(req.headers).forEach(function (k) { headers[k] = req.headers[k]; });
+        var pre = '';
+        var bodyLine = '';
+
+        if (b.mode === 'multipart') {
+            delete headers['Content-Type'];
+            var fd = ['const form = new FormData();'];
+            b.fields.forEach(function (f) { fd.push('form.append("' + f.name.replace(/"/g, '\\"') + '", ' + JSON.stringify(String(f.value)) + ');'); });
+            b.files.forEach(function (f) { fd.push('form.append("' + f.name.replace(/"/g, '\\"') + '", fileInput.files[0]); // ' + fileNames(f)[0]); });
+            pre = fd.join('\n') + '\n\n';
+            bodyLine = '  body: form,';
+        } else if (b.mode === 'json') {
+            bodyLine = '  body: JSON.stringify(' + indentLines(JSON.stringify(b.value, null, 2), '  ') + '),';
+        } else if (b.mode === 'raw') {
+            bodyLine = '  body: ' + JSON.stringify(b.value) + ',';
+        }
+
+        var lines = [pre + 'const response = await fetch("' + req.url.replace(/"/g, '\\"') + '", {'];
         lines.push('  method: "' + req.method.toUpperCase() + '",');
-        var hkeys = Object.keys(req.headers);
+        var hkeys = Object.keys(headers);
         if (hkeys.length) {
             lines.push('  headers: {');
             lines.push(hkeys.map(function (k) {
-                return '    "' + k.replace(/"/g, '\\"') + '": "' + String(req.headers[k]).replace(/"/g, '\\"') + '"';
+                return '    "' + k.replace(/"/g, '\\"') + '": "' + String(headers[k]).replace(/"/g, '\\"') + '"';
             }).join(',\n'));
             lines.push('  },');
         }
-        var body = parsedBody(req);
-        if (body !== undefined) {
-            lines.push('  body: ' + (typeof body === 'string'
-                ? JSON.stringify(body)
-                : 'JSON.stringify(' + indentLines(JSON.stringify(body, null, 2), '  ') + ')') + ',');
-        }
+        if (bodyLine) lines.push(bodyLine);
         lines.push('});');
         lines.push('const data = await response.json();');
         return lines.join('\n');
     }
 
     function buildPython(req) {
+        var b = req.body;
+        var headers = {};
+        Object.keys(req.headers).forEach(function (k) { headers[k] = req.headers[k]; });
         var args = ['    "' + req.url.replace(/"/g, '\\"') + '",'];
-        if (Object.keys(req.headers).length) {
-            args.push('    headers=' + indentLines(toPython(req.headers), '    ') + ',');
+
+        if (b.mode === 'multipart') {
+            delete headers['Content-Type'];
+            if (b.fields.length) args.push('    data=' + indentLines(toPython(fieldsToObject(b.fields)), '    ') + ',');
+            var files = b.files.map(function (f) { return '"' + f.name + '": open("' + fileNames(f)[0] + '", "rb")'; });
+            if (files.length) args.push('    files={' + files.join(', ') + '},');
+        } else if (b.mode === 'json') {
+            args.push('    json=' + indentLines(toPython(b.value), '    ') + ',');
+        } else if (b.mode === 'raw') {
+            args.push('    data=' + JSON.stringify(b.value) + ',');
         }
-        var body = parsedBody(req);
-        if (body !== undefined) {
-            args.push(typeof body === 'string'
-                ? '    data=' + JSON.stringify(body) + ','
-                : '    json=' + indentLines(toPython(body), '    ') + ',');
-        }
+        if (Object.keys(headers).length) args.push('    headers=' + indentLines(toPython(headers), '    ') + ',');
+
         return 'import requests\n\nresponse = requests.' + req.method.toLowerCase() +
             '(\n' + args.join('\n') + '\n)\nprint(response.json())';
     }
@@ -626,9 +1022,24 @@
         updateSnippet();
     }
 
+    /* Lightweight, language-agnostic syntax colouring for the request snippets
+       (curl / PHP / JS / Python). Escape-first like highlightJson: it runs on
+       already-escaped text and wraps tokens in the fixed tok-* span set, so
+       textContent (what Copy reads) still returns the verbatim source. */
+    function highlightCode(escaped) {
+        var re = /(#[^\n]*)|(&quot;(?:\\.|(?!&quot;).)*&quot;|&#39;(?:\\.|(?!&#39;).)*&#39;)|\b(true|false|null|None|True|False|const|let|var|await|async|function|return|use|import|from|new|print|def|class)\b|(\b\d+(?:\.\d+)?\b)/g;
+        return escaped.replace(re, function (m, comment, str, kw, num) {
+            if (comment) return '<span class="tok-comment">' + comment + '</span>';
+            if (str) return '<span class="tok-str">' + str + '</span>';
+            if (kw) return '<span class="tok-kw">' + kw + '</span>';
+            if (num) return '<span class="tok-num">' + num + '</span>';
+            return m;
+        });
+    }
+
     function updateSnippet() {
         var code = document.getElementById('snippetCode');
-        if (code) code.textContent = GENERATORS[activeLang()].build(readForm());
+        if (code) code.innerHTML = highlightCode(esc(GENERATORS[activeLang()].build(readForm())));
     }
 
     function copySnippet() {
@@ -654,8 +1065,25 @@
         head.setAttribute('data-busy', '');
         mount.innerHTML = '';
 
-        var options = { method: req.method.toUpperCase(), headers: req.headers };
-        if (req.body && BODY_METHODS[req.method]) options.body = req.body;
+        var options = { method: req.method.toUpperCase(), headers: {} };
+        Object.keys(req.headers).forEach(function (k) { options.headers[k] = req.headers[k]; });
+
+        var b = req.body;
+        if (b.mode === 'json') {
+            options.body = JSON.stringify(b.value);
+        } else if (b.mode === 'raw') {
+            options.body = b.value;
+        } else if (b.mode === 'multipart') {
+            var fd = new FormData();
+            b.fields.forEach(function (f) { fd.append(f.name, f.value); });
+            document.getElementById('consoleForm')
+                .querySelectorAll('[data-kind="body-field"][data-ftype="file"]')
+                .forEach(function (input) {
+                    if (input.files) Array.prototype.forEach.call(input.files, function (file) { fd.append(input.dataset.name, file); });
+                });
+            delete options.headers['Content-Type']; // let the browser set the multipart boundary
+            options.body = fd;
+        }
 
         var started = performance.now();
         fetch(req.url, options).then(function (res) {
@@ -670,21 +1098,77 @@
         });
     }
 
-    function renderResponse(res, text, ms) {
-        var body = text;
-        try { body = JSON.stringify(JSON.parse(text), null, 2); } catch (e) { /* keep raw */ }
+    function formatBytes(n) {
+        if (n < 1024) return n + ' B';
+        if (n < 1024 * 1024) return (n / 1024).toFixed(1) + ' KB';
+        return (n / (1024 * 1024)).toFixed(2) + ' MB';
+    }
 
-        var headerRows = '';
-        res.headers.forEach(function (value, key) { headerRows += key + ': ' + value + '\n'; });
+    /* Colourise pretty-printed JSON. Operates on already-escaped text (so the
+       string delimiter is &quot;, not "), then wraps tokens in a fixed safe tag
+       set — same escape-first contract as the markdown helpers. */
+    function highlightJson(escaped) {
+        var re = /&quot;(?:\\.|(?!&quot;).)*&quot;(\s*:)?|\b(?:true|false)\b|\bnull\b|-?\d+(?:\.\d+)?(?:[eE][+\-]?\d+)?/g;
+        return escaped.replace(re, function (m) {
+            if (m.charAt(0) === '&') {
+                if (/:\s*$/.test(m)) {
+                    var end = m.lastIndexOf('&quot;') + 6; // wrap the key, leave the colon bare
+                    return '<span class="tok-key">' + m.slice(0, end) + '</span>' + m.slice(end);
+                }
+                return '<span class="tok-str">' + m + '</span>';
+            }
+            if (m === 'true' || m === 'false') return '<span class="tok-bool">' + m + '</span>';
+            if (m === 'null') return '<span class="tok-null">' + m + '</span>';
+            return '<span class="tok-num">' + m + '</span>';
+        });
+    }
+
+    function renderResponse(res, text, ms) {
+        var isJson = false;
+        var body = text;
+        try { body = JSON.stringify(JSON.parse(text), null, 2); isJson = true; } catch (e) { /* keep raw */ }
+
+        var size = formatBytes(new Blob([text]).size);
+        var ctype = (res.headers.get('content-type') || '').split(';')[0].trim();
+        var ctypeTag = ctype ? '<span class="response__ctype">' + esc(ctype) + '</span>' : '';
+
+        var headers = [];
+        res.headers.forEach(function (value, key) { headers.push({ key: key, value: value }); });
+        var headerRows = headers.length
+            ? headers.map(function (h) {
+                return '<div class="hrow"><span class="hrow__key">' + esc(h.key) + '</span>' +
+                    '<span class="hrow__val">' + esc(h.value) + '</span></div>';
+            }).join('')
+            : '<div class="response__empty">No headers</div>';
+
+        var bodyHtml = text === ''
+            ? '<div class="response__empty">No content</div>'
+            : '<pre class="response__body">' + (isJson ? highlightJson(esc(body)) : esc(body)) + '</pre>';
+        var copyBtn = text === '' ? '' : '<button class="response__copy" type="button">Copy</button>';
 
         document.getElementById('responseMount').innerHTML =
             '<div class="response">' +
-                '<div class="response__status"><span class="response__code" data-class="' + statusClass(res.status) + '">' +
-                    esc(res.status) + '</span><span>' + esc(res.statusText || '') + '</span>' +
-                    '<span class="response__time">' + ms + ' ms</span></div>' +
-                '<details><summary>Headers</summary><pre class="response__body">' + esc(headerRows.trim()) + '</pre></details>' +
-                '<details open><summary>Body</summary><pre class="response__body">' + esc(body) + '</pre></details>' +
+                '<div class="response__status">' +
+                    '<span class="response__code" data-class="' + statusClass(res.status) + '">' + esc(res.status) + '</span>' +
+                    '<span class="response__text">' + esc(res.statusText || '') + '</span>' +
+                    ctypeTag +
+                    '<span class="response__meta">' + esc(size) + ' · ' + ms + ' ms</span>' +
+                '</div>' +
+                '<details open><summary>Body' + copyBtn + '</summary>' + bodyHtml + '</details>' +
+                '<details><summary>Headers <span class="summary__count">' + headers.length + '</span></summary>' +
+                    '<div class="response__headers">' + headerRows + '</div></details>' +
             '</div>';
+
+        var btn = document.querySelector('.response__copy');
+        if (btn) btn.addEventListener('click', function (e) {
+            e.preventDefault();
+            e.stopPropagation(); // don't toggle the <details>
+            if (!navigator.clipboard) return;
+            navigator.clipboard.writeText(body).then(function () {
+                btn.textContent = 'Copied';
+                setTimeout(function () { btn.textContent = 'Copy'; }, 1400);
+            });
+        });
     }
 
     function renderError(err, url) {
