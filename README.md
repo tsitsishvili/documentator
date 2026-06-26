@@ -19,6 +19,8 @@ descriptions, and try requests live.
 
 Requires PHP 8.2+ and Laravel 12 or 13.
 
+![Documentator built-in API explorer showing endpoint navigation, inferred parameters, response schemas, and a request playground](docs/images/documentator-ui.jpg)
+
 ## Installation
 
 ```bash
