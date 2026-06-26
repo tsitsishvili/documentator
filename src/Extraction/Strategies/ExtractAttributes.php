@@ -4,9 +4,11 @@ declare(strict_types=1);
 
 namespace Tsitsishvili\Documentator\Extraction\Strategies;
 
+use Illuminate\Http\Resources\Json\ResourceCollection;
 use Illuminate\Routing\Route;
 use ReflectionClass;
 use ReflectionMethod;
+use ReflectionNamedType;
 use Tsitsishvili\Documentator\Attributes\Authenticated;
 use Tsitsishvili\Documentator\Attributes\BodyParam;
 use Tsitsishvili\Documentator\Attributes\Deprecated;
@@ -134,7 +136,9 @@ final class ExtractAttributes implements ExtractionStrategy
                 description: $response->description,
                 example: $response->example,
                 resource: $response->resource,
-                schema: $this->responseSchema($response),
+                schema: $this->responseSchema($response, $method),
+                collection: $this->paginatedCollection($method),
+                paginationLinks: $response->paginationLinks,
             );
 
             if ($response->paginated) {
@@ -148,7 +152,7 @@ final class ExtractAttributes implements ExtractionStrategy
     /**
      * @return array<string, mixed>|null
      */
-    private function responseSchema(Response $response): ?array
+    private function responseSchema(Response $response, ReflectionMethod $method): ?array
     {
         if ($response->resource === null) {
             return null;
@@ -157,10 +161,26 @@ final class ExtractAttributes implements ExtractionStrategy
         $item = $this->schemas->extract($response->resource);
 
         return match (true) {
-            $response->paginated => PaginationSchema::paginated($item),
+            $response->paginated => PaginationSchema::paginated($item, $this->paginatedCollection($method), $response->paginationLinks),
             $response->collection => PaginationSchema::collection($item),
             default => $item,
         };
+    }
+
+    /**
+     * @return class-string<ResourceCollection>|null
+     */
+    private function paginatedCollection(ReflectionMethod $method): ?string
+    {
+        $returnType = $method->getReturnType();
+
+        if (! $returnType instanceof ReflectionNamedType || $returnType->isBuiltin()) {
+            return null;
+        }
+
+        $class = $returnType->getName();
+
+        return is_subclass_of($class, ResourceCollection::class) ? $class : null;
     }
 
     private function isNativeDeprecated(ReflectionClass|ReflectionMethod $reflector): bool

@@ -16,12 +16,25 @@ use Tsitsishvili\Documentator\Extraction\Support\RuleParser;
  */
 final class OpenApiGenerator
 {
+    /** @var array<string, int> */
+    private array $componentCounts = [];
+
+    /** @var array<string, string> */
+    private array $componentNames = [];
+
+    /** @var array<string, array<string, mixed>> */
+    private array $componentSchemas = [];
+
     /**
      * @param  array<int, EndpointData>  $endpoints
      * @return array<string, mixed>
      */
     public function generate(array $endpoints): array
     {
+        $this->componentCounts = $this->componentCounts($endpoints);
+        $this->componentNames = [];
+        $this->componentSchemas = [];
+
         $paths = [];
         $tags = [];
         $globalScheme = $this->defaultSecurityScheme();
@@ -36,17 +49,47 @@ final class OpenApiGenerator
             }
         }
 
-        return array_filter([
+        $components = [
+            'securitySchemes' => (object) config('documentator.security', []),
+        ];
+
+        if ($this->componentSchemas !== []) {
+            ksort($this->componentSchemas);
+            $components['schemas'] = $this->componentSchemas;
+        }
+
+        $spec = array_filter([
             'openapi' => '3.1.0',
             'info' => $this->info(),
             'servers' => config('documentator.servers', []),
             'security' => $globalScheme !== null ? [[$globalScheme => []]] : [],
             'tags' => array_map(fn (string $name) => ['name' => $name], array_keys($tags)),
             'paths' => $paths,
-            'components' => [
-                'securitySchemes' => (object) config('documentator.security', []),
-            ],
+            'components' => $components,
         ]);
+
+        return $this->transform($spec);
+    }
+
+    /**
+     * @param  array<string, mixed>  $spec
+     * @return array<string, mixed>
+     */
+    private function transform(array $spec): array
+    {
+        foreach ((array) config('documentator.extensions.openapi_transformers', []) as $transformer) {
+            $callback = is_string($transformer) ? app($transformer) : $transformer;
+
+            if (is_callable($callback)) {
+                $result = $callback($spec);
+
+                if (is_array($result)) {
+                    $spec = $result;
+                }
+            }
+        }
+
+        return $spec;
     }
 
     /**
@@ -95,7 +138,7 @@ final class OpenApiGenerator
         ], fn ($value) => $value !== null && $value !== []);
 
         if ($endpoint->authenticated) {
-            $operation['security'] = [[$endpoint->securityScheme ?? 'default' => []]];
+            $operation['security'] = [[$endpoint->securityScheme ?? 'default' => $endpoint->securityScopes]];
         } elseif ($globalScheme !== null) {
             // A global security requirement is in force; this operation isn't
             // authenticated, so opt it out with an empty requirement to keep it
@@ -259,12 +302,90 @@ final class OpenApiGenerator
         if ($response->example !== null) {
             $body['content'] = ['application/json' => ['example' => $response->example]];
         } elseif ($response->schema !== null) {
-            $body['content'] = ['application/json' => ['schema' => $response->schema]];
+            $body['content'] = ['application/json' => ['schema' => $this->responseSchema($response)]];
         } elseif ($response->resource !== null) {
             $body['content'] = ['application/json' => ['schema' => ['type' => 'object']]];
         }
 
         return $body;
+    }
+
+    /**
+     * @param  array<int, EndpointData>  $endpoints
+     * @return array<string, int>
+     */
+    private function componentCounts(array $endpoints): array
+    {
+        $counts = [];
+
+        foreach ($endpoints as $endpoint) {
+            foreach ($endpoint->responses as $response) {
+                $key = $this->componentKey($response);
+
+                if ($key !== null) {
+                    $counts[$key] = ($counts[$key] ?? 0) + 1;
+                }
+            }
+        }
+
+        return $counts;
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function responseSchema(ResponseData $response): array
+    {
+        $key = $this->componentKey($response);
+
+        if ($key === null || ($this->componentCounts[$key] ?? 0) < 2) {
+            return $response->schema ?? ['type' => 'object'];
+        }
+
+        $name = $this->componentName($response, $key);
+        $this->componentSchemas[$name] ??= $response->schema ?? ['type' => 'object'];
+
+        return ['$ref' => '#/components/schemas/'.$name];
+    }
+
+    private function componentKey(ResponseData $response): ?string
+    {
+        if ($response->resource === null || $response->schema === null) {
+            return null;
+        }
+
+        return $response->resource.'|'.$this->schemaKind($response->schema).'|'.md5(json_encode($response->schema) ?: '');
+    }
+
+    /**
+     * @param  array<string, mixed>  $schema
+     */
+    private function schemaKind(array $schema): string
+    {
+        $properties = $schema['properties'] ?? [];
+
+        if (isset($properties['data']['type']) && $properties['data']['type'] === 'array') {
+            return isset($properties['meta']) ? 'Paginated' : 'Collection';
+        }
+
+        return 'Resource';
+    }
+
+    private function componentName(ResponseData $response, string $key): string
+    {
+        if (isset($this->componentNames[$key])) {
+            return $this->componentNames[$key];
+        }
+
+        $base = Str::studly(class_basename((string) $response->resource));
+        $kind = $this->schemaKind($response->schema ?? []);
+        $name = $base.($kind === 'Resource' ? '' : $kind);
+
+        if (isset($this->componentSchemas[$name]) && $this->componentSchemas[$name] !== $response->schema) {
+            $name .= substr(md5($key), 0, 8);
+        }
+
+        return $this->componentNames[$key] = $name;
     }
 
     /**

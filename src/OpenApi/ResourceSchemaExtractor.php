@@ -34,7 +34,19 @@ final class ResourceSchemaExtractor
 
     private const OBJECT = ['type' => 'object'];
 
-    private const CONDITIONALS = ['when', 'whenloaded', 'whennotnull', 'whenappended', 'whenpivotloaded', 'whenhas'];
+    private const CONDITIONALS = [
+        'when',
+        'whenloaded',
+        'whennotnull',
+        'whenappended',
+        'whenpivotloaded',
+        'whenpivotloadedas',
+        'whenhas',
+        'whencounted',
+        'whenaggregated',
+        'whenexistsloaded',
+        'mergewhen',
+    ];
 
     private readonly Parser $parser;
 
@@ -142,7 +154,13 @@ final class ResourceSchemaExtractor
         $properties = [];
 
         foreach ($array->items as $item) {
-            if (! $item instanceof Node\ArrayItem || ! $item->key instanceof Scalar\String_) {
+            if (! $item instanceof Node\ArrayItem) {
+                continue;
+            }
+
+            if (! $item->key instanceof Scalar\String_) {
+                $properties = array_replace($properties, $this->mergedProperties($item->value, $depth));
+
                 continue;
             }
 
@@ -162,6 +180,46 @@ final class ResourceSchemaExtractor
         }
 
         return $properties;
+    }
+
+    /**
+     * Inline fields from mergeWhen([...]) / merge([...]) blocks.
+     *
+     * @return array<string, array<string, mixed>>
+     */
+    private function mergedProperties(Node\Expr $expr, int $depth): array
+    {
+        if (! $expr instanceof Node\Expr\MethodCall || ! $expr->name instanceof Node\Identifier) {
+            return [];
+        }
+
+        $method = strtolower($expr->name->toString());
+
+        if (! in_array($method, ['merge', 'mergewhen'], true)) {
+            return [];
+        }
+
+        foreach ($expr->args as $arg) {
+            if (! $arg instanceof Node\Arg) {
+                continue;
+            }
+
+            $array = $this->arrayFromExpression($arg->value);
+
+            if ($array instanceof Node\Expr\Array_) {
+                $properties = $this->properties($array, $depth);
+
+                if ($this->hasConditional($expr)) {
+                    foreach ($properties as &$schema) {
+                        $schema['nullable'] = true;
+                    }
+                }
+
+                return $properties;
+            }
+        }
+
+        return [];
     }
 
     /**
@@ -280,6 +338,30 @@ final class ResourceSchemaExtractor
             if ($arg->value instanceof Node\Expr\New_ && ($schema = $this->newSchema($arg->value, $depth))) {
                 return $schema;
             }
+            if (($array = $this->arrayFromExpression($arg->value)) instanceof Node\Expr\Array_) {
+                return $this->arraySchema($array, $depth);
+            }
+        }
+
+        return null;
+    }
+
+    private function arrayFromExpression(Node\Expr $expr): ?Node\Expr\Array_
+    {
+        if ($expr instanceof Node\Expr\Array_) {
+            return $expr;
+        }
+
+        if ($expr instanceof Node\Expr\Closure) {
+            foreach ($expr->stmts as $stmt) {
+                if ($stmt instanceof Node\Stmt\Return_ && $stmt->expr instanceof Node\Expr\Array_) {
+                    return $stmt->expr;
+                }
+            }
+        }
+
+        if ($expr instanceof Node\Expr\ArrowFunction && $expr->expr instanceof Node\Expr\Array_) {
+            return $expr->expr;
         }
 
         return null;
@@ -338,7 +420,7 @@ final class ResourceSchemaExtractor
             $name === 'id', str_ends_with($name, '_id') => ['type' => 'integer'],
             str_ends_with($name, '_at') => ['type' => 'string', 'format' => 'date-time'],
             str_starts_with($name, 'is_'), str_starts_with($name, 'has_') => ['type' => 'boolean'],
-            in_array($name, ['count', 'quantity', 'qty', 'total'], true) => ['type' => 'integer'],
+            str_ends_with($name, '_count'), in_array($name, ['count', 'quantity', 'qty', 'total'], true) => ['type' => 'integer'],
             default => ['type' => 'string'],
         };
     }

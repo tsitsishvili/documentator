@@ -447,6 +447,20 @@ a { color: inherit; }
     box-shadow: 0 0 22px -10px rgba(47, 212, 163, .65);
 }
 .endpoint__try:hover { filter: brightness(1.05); }
+.endpoint__link {
+    margin-left: auto;
+    font-family: var(--mono);
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--text-2);
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 8px 11px;
+    cursor: pointer;
+}
+.endpoint__link + .endpoint__try { margin-left: 6px; }
+.endpoint__link:hover { color: var(--text); border-color: var(--blue); }
 .endpoint__auth {
     display: inline-flex; align-items: center; gap: 7px;
     margin-top: 14px;

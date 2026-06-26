@@ -8,6 +8,7 @@ use Illuminate\Console\Command;
 use Illuminate\Support\Facades\File;
 use Tsitsishvili\Documentator\Data\EndpointData;
 use Tsitsishvili\Documentator\Documentator;
+use Tsitsishvili\Documentator\Support\OpenApiDiff;
 
 /**
  * Audits the inferred documentation so CI can catch gaps and drift: endpoints
@@ -98,11 +99,14 @@ final class CheckCommand extends Command
             return true;
         }
 
-        $expected = json_encode(json_decode(File::get($path), true));
-        $actual = json_encode($documentator->toOpenApi());
+        $expectedSpec = json_decode(File::get($path), true);
+        $actualSpec = $documentator->toOpenApi();
+        $expected = json_encode($expectedSpec);
+        $actual = json_encode($actualSpec);
 
         if ($expected !== $actual) {
             $this->error("Generated spec has drifted from {$path}. Re-run documentator:export and commit the result.");
+            $this->reportDrift(is_array($expectedSpec) ? $expectedSpec : [], $actualSpec);
 
             return true;
         }
@@ -110,5 +114,31 @@ final class CheckCommand extends Command
         $this->info("Spec matches {$path}.");
 
         return false;
+    }
+
+    /**
+     * @param  array<string, mixed>  $expected
+     * @param  array<string, mixed>  $actual
+     */
+    private function reportDrift(array $expected, array $actual): void
+    {
+        $changes = OpenApiDiff::compare($expected, $actual);
+
+        if ($changes === []) {
+            $this->warn('  The JSON changed, but no path/operation/response drift was detected.');
+
+            return;
+        }
+
+        $this->newLine();
+        $this->warn('Contract changes:');
+
+        foreach (array_slice($changes, 0, 20) as $change) {
+            $this->line("  [{$change['severity']}] {$change['location']} — {$change['message']}");
+        }
+
+        if (count($changes) > 20) {
+            $this->line('  ... and '.(count($changes) - 20).' more change(s).');
+        }
     }
 }

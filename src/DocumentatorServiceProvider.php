@@ -48,6 +48,10 @@ final class DocumentatorServiceProvider extends ServiceProvider
                 $app->make(ExtractDataObjects::class),
                 $app->make(ExtractResponses::class),
                 $app->make(ExtractErrorResponses::class),
+                ...array_map(
+                    fn (string $strategy) => $app->make($strategy),
+                    (array) config('documentator.extensions.strategies', []),
+                ),
                 $app->make(ExtractAttributes::class),
             ]);
         });

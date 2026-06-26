@@ -4,6 +4,10 @@ declare(strict_types=1);
 
 namespace Tsitsishvili\Documentator\OpenApi;
 
+use Illuminate\Http\Request;
+use Illuminate\Http\Resources\Json\ResourceCollection;
+use Illuminate\Pagination\LengthAwarePaginator;
+use Throwable;
 use Tsitsishvili\Documentator\Data\ParameterData;
 
 /**
@@ -58,11 +62,12 @@ final class PaginationSchema
      * `{ "data": [...], "links": {...}, "meta": {...} }` — a paginated collection.
      *
      * @param  array<string, mixed>  $item
+     * @param  class-string<ResourceCollection>|null  $collection
      * @return array<string, mixed>
      */
-    public static function paginated(array $item): array
+    public static function paginated(array $item, ?string $collection = null, ?bool $paginationLinks = null): array
     {
-        return [
+        $schema = [
             'type' => 'object',
             'properties' => [
                 'data' => ['type' => 'array', 'items' => $item],
@@ -85,9 +90,126 @@ final class PaginationSchema
                         'per_page' => ['type' => 'integer'],
                         'to' => ['type' => 'integer', 'nullable' => true],
                         'total' => ['type' => 'integer'],
+                        'links' => [
+                            'type' => 'array',
+                            'items' => [
+                                'type' => 'object',
+                                'properties' => [
+                                    'url' => ['type' => 'string', 'nullable' => true],
+                                    'label' => ['type' => 'string'],
+                                    'active' => ['type' => 'boolean'],
+                                ],
+                            ],
+                        ],
                     ],
                 ],
             ],
         ];
+
+        if ($paginationLinks === false) {
+            unset($schema['properties']['links'], $schema['properties']['meta']['properties']['links']);
+        }
+
+        return self::applyPaginationInformation($schema, $collection);
+    }
+
+    /**
+     * @param  array<string, mixed>  $schema
+     * @param  class-string<ResourceCollection>|null  $collection
+     * @return array<string, mixed>
+     */
+    private static function applyPaginationInformation(array $schema, ?string $collection): array
+    {
+        if ($collection === null || ! is_subclass_of($collection, ResourceCollection::class)) {
+            return $schema;
+        }
+
+        $hasHook = method_exists($collection, 'paginationInformation')
+            || (method_exists($collection, 'hasMacro') && $collection::hasMacro('paginationInformation'));
+
+        if (! $hasHook) {
+            return $schema;
+        }
+
+        try {
+            /** @var ResourceCollection $resource */
+            $resource = new $collection(self::samplePaginator());
+            $information = $resource->paginationInformation(
+                Request::create('/'),
+                self::samplePaginated(),
+                self::defaultPaginationInformation(),
+            );
+        } catch (Throwable) {
+            return $schema;
+        }
+
+        return is_array($information) ? self::pruneToInformation($schema, $information) : $schema;
+    }
+
+    private static function samplePaginator(): LengthAwarePaginator
+    {
+        return new LengthAwarePaginator([], 0, 15, 1, ['path' => '/']);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private static function samplePaginated(): array
+    {
+        return self::samplePaginator()->toArray();
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private static function defaultPaginationInformation(): array
+    {
+        $paginated = self::samplePaginated();
+
+        return [
+            'links' => [
+                'first' => $paginated['first_page_url'] ?? null,
+                'last' => $paginated['last_page_url'] ?? null,
+                'prev' => $paginated['prev_page_url'] ?? null,
+                'next' => $paginated['next_page_url'] ?? null,
+            ],
+            'meta' => array_diff_key($paginated, array_flip([
+                'data',
+                'first_page_url',
+                'last_page_url',
+                'prev_page_url',
+                'next_page_url',
+            ])),
+        ];
+    }
+
+    /**
+     * @param  array<string, mixed>  $schema
+     * @param  array<string, mixed>  $information
+     * @return array<string, mixed>
+     */
+    private static function pruneToInformation(array $schema, array $information): array
+    {
+        foreach (array_keys($schema['properties']) as $name) {
+            if ($name !== 'data' && ! array_key_exists($name, $information)) {
+                unset($schema['properties'][$name]);
+            }
+        }
+
+        foreach (['links', 'meta'] as $name) {
+            if (
+                isset($schema['properties'][$name]['properties'])
+                && isset($information[$name])
+                && is_array($information[$name])
+            ) {
+                foreach (array_keys($schema['properties'][$name]['properties']) as $property) {
+                    if (! array_key_exists($property, $information[$name])) {
+                        unset($schema['properties'][$name]['properties'][$property]);
+                    }
+                }
+            }
+        }
+
+        return $schema;
     }
 }

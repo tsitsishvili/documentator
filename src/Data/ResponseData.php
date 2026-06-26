@@ -18,5 +18,7 @@ final class ResponseData
         public mixed $example = null,
         public ?string $resource = null,
         public ?array $schema = null,
+        public ?string $collection = null,
+        public ?bool $paginationLinks = null,
     ) {}
 }

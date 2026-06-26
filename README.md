@@ -13,7 +13,9 @@ descriptions, and try requests live.
 - **Built-in explorer** — a dark "Aurora" UI (no external assets) with a request
   playground, auth, snippets, and a readable response viewer. Or switch to
   [Scalar](https://scalar.com).
-- **Standard output** — a plain OpenAPI 3.1 document other tools can consume.
+- **Standard output** — a plain OpenAPI 3.1 document other tools can consume,
+  with response schemas shared by multiple operations hoisted into
+  `components/schemas`.
 
 Requires PHP 8.2+ and Laravel 12 or 13.
 
@@ -42,8 +44,8 @@ pipeline enriches the endpoint:
 | Controller PHPDoc | **summary** (first line) and **description** (the rest), so written docblocks become docs |
 | FormRequest `rules()` | parameters with types, required, **enums** (`in:`, `Rule::enum`, `Rule::in`), **formats** (email/uuid/date), bounds (`min`/`max`), `regex`→`pattern`, `digits`→integer, `confirmed`→a `_confirmation` field, nullability, **nested** rules (`items.*.id`), **file uploads** → multipart. On GET/HEAD routes these become **query parameters** instead of a body |
 | spatie/laravel-data | request/response **Data objects** — typed properties, enums, nested Data, collections (optional, auto-detected) |
-| Controller return type | a success response schema from a Resource's `toArray()`, a `ResourceCollection` (**paginator envelope** + `page`/`per_page` query params), or an **Eloquent model** (`$casts` + `@property`). Status follows the verb: POST → **201**, DELETE → **204** |
-| Generated examples | a representative `example` for every body/parameter (`email`→`user@example.com`, enums, dates, …) so the playground starts filled |
+| Controller return type | a success response schema from a Resource's `toArray()`, a `ResourceCollection`, or a `Resource::collection($q->paginate())` **return statement** (**paginator envelope** + `page`/`per_page` query params), or an **Eloquent model** (`$casts` + `@property`). Status follows the verb: POST → **201**, DELETE → **204** |
+| Generated examples | a representative `example` for every body/parameter — format- and name-aware (`email`→`user@example.com`, `*_url`, `*_name`, dates, enums, …) so the playground starts filled |
 | PHP attributes | overrides for everything above (runs last) |
 
 ```php
@@ -100,7 +102,9 @@ Available attributes: `Summary`, `Description`, `Group`, `Authenticated`,
 `Group`, `Authenticated`, `Hidden` and `Deprecated` may also be placed on the
 controller class to set a default for all its methods (`#[Deprecated]` also
 honours PHP 8.4's native `#[\Deprecated]`). `#[Response(resource: X, paginated: true)]` (or
-`collection: true`) wraps a resource in the paginator / `{ data: [...] }` envelope.
+`collection: true`) wraps a resource in the paginator / `{ data: [...] }`
+envelope; add `paginationLinks: false` for a custom collection that drops
+Laravel's `links` blocks.
 
 Put `#[UsesModel(Order::class)]` on a Resource to tell the extractor which
 Eloquent model it wraps (otherwise the model is resolved by naming convention,
@@ -110,8 +114,11 @@ configurable via `models_namespace`), so field types come from the model's casts
 
 Auth schemes are declared in `config('documentator.security')` as OpenAPI
 `securitySchemes`. Endpoints behind `auth` middleware are marked authenticated
-automatically; use `#[Authenticated('scheme-key')]` to be explicit or pick a
-non-default scheme. The UI renders the matching authorize / token input.
+automatically — and `auth:<guard>` picks the scheme whose key matches the guard
+name, falling back to `default`; use `#[Authenticated('scheme-key')]` to be
+explicit or pick a non-default scheme. Token-ability middleware
+(`abilities:` / `ability:` / `scopes:` / `scope:`) is surfaced as the operation's
+required scopes. The UI renders the matching authorize / token input.
 
 To require auth across the whole API instead of marking each endpoint, set
 `documentator.authenticate` to `true` (or a scheme name) — it emits a top-level
@@ -122,11 +129,12 @@ authenticated opt out automatically and stay public.
 
 The built-in explorer can call your API live. It remembers the auth token and
 selected server across endpoints, deep-links each endpoint (`#get-api-orders`)
-for sharing and reload, renders Markdown in descriptions, and shows a copyable
-request snippet in **cURL, PHP (Laravel `Http`), JavaScript (`fetch`),
-TypeScript and Python (`requests`)** — cURL, PHP, JS and TypeScript as tabs with
-the rest under an **Other** dropdown, and the chosen language is remembered too.
-The TypeScript snippet generates typed `Request` / `Response` interfaces and an
+for sharing and reload — the **Link** button copies that deep link — renders
+Markdown in descriptions, and shows a copyable request snippet in **cURL, PHP
+(Laravel `Http`), JavaScript (`fetch`), TypeScript, Python (`requests`), Go,
+Ruby, Java, C# and HTTPie** — cURL, PHP, JS and TypeScript as tabs with the rest
+under an **Other** dropdown, and the chosen language is remembered too. The
+TypeScript snippet generates typed `Request` / `Response` interfaces and an
 `async` `fetch` wrapper (with `Date` hydration).
 
 The request panel is resizable on desktop and becomes an off-canvas drawer on
@@ -164,7 +172,8 @@ php artisan documentator:postman collection.json    # export a Postman v2.1 coll
 
 `documentator:check` audits the generated docs — it flags closure routes (which
 can't be introspected) and endpoints with no documented success schema, and can
-detect drift from a committed spec:
+detect drift from a committed spec, listing the specific path / operation /
+response changes:
 
 ```bash
 php artisan documentator:check                       # report issues (exit 0)
@@ -189,6 +198,7 @@ Key options in `config/documentator.php`:
 - `ui.driver` — `documentator` (built-in explorer, default) or `scalar`.
 - `ui.assets` — Scalar bundle URL when `ui.driver = scalar` (pinned; self-host for SRI/CSP).
 - `cache` — pre-generated spec file.
+- `extensions.strategies` / `extensions.openapi_transformers` — register custom extraction strategies (resolved from the container, inserted just before attribute overrides) and transformers that receive the generated spec array and may return a modified one. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Development
 

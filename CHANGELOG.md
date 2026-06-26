@@ -7,6 +7,63 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-06-26
+
+### Added
+
+- **Extension hooks.** Register custom extraction strategies
+  (`extensions.strategies`) — resolved from the container and inserted just before
+  `ExtractAttributes`, so attributes still override them — and OpenAPI
+  transformers (`extensions.openapi_transformers`) that receive the generated spec
+  array and may return a modified one for organization-specific naming or metadata.
+- **Per-guard security schemes.** `auth:<guard>` middleware now maps to a
+  configured security scheme whose key matches the guard name, falling back to
+  `default`, instead of always emitting `default`.
+- **Token/ability scopes.** `abilities:` / `ability:` / `scopes:` / `scope:`
+  middleware are surfaced as the operation's security scopes in its OpenAPI
+  security requirement.
+- **Inferred collection & paginated responses from the method body.**
+  `ExtractResponses` now statically parses a `Resource::collection(...)` return
+  statement, documenting a `{ data: [...] }` collection — or the full paginated
+  shape plus `page` / `per_page` query parameters when the argument calls
+  `paginate()` / `simplePaginate()` / `cursorPaginate()` — even when the method's
+  return type is only `AnonymousResourceCollection`.
+- **Reusable response schema components.** A response schema shared by two or more
+  operations is hoisted into `components/schemas` and referenced by `$ref`
+  (named from the resource and its kind — `…Collection` / `…Paginated`) instead of
+  being inlined repeatedly.
+- **Contract-aware drift report.** `documentator:check --against` now lists the
+  specific path / operation / response changes (new `Support/OpenApiDiff`) instead
+  of only reporting that the spec drifted.
+- **More request-snippet languages.** The explorer's snippet pane adds Go, Ruby,
+  Java, C# and HTTPie generators (in the **Other** dropdown).
+- **Copy endpoint link.** Each endpoint header gains a **Link** button that copies
+  a deep link to that operation to the clipboard.
+- **`#[Response(paginationLinks: false)]`.** Opt a custom collection out of
+  Laravel's `links` blocks when it drops them from the paginator shape.
+
+### Changed
+
+- **Pagination schema reflects custom collections.** `PaginationSchema` honours a
+  `ResourceCollection::paginationInformation()` override, pruning the documented
+  `links` / `meta` to what the collection actually returns, and now documents the
+  `meta.links` page-link array.
+- **Richer API Resource parsing.** `mergeWhen([...])` / `merge([...])` blocks have
+  their fields inlined (marked nullable when conditional), more `when*` helpers are
+  recognized (`whenCounted`, `whenAggregated`, `whenPivotLoadedAs`, …), and
+  `*_count` fields infer `integer`.
+- **Smarter generated examples.** `SchemaSampler` is now field-name aware
+  (`email`, `uuid`, `url`, `*_name`, `title`, `description`, `*_at`, `*_date`),
+  respects `minItems`, and resolves `oneOf` / `anyOf` / `allOf`.
+
+### Fixed
+
+- **Clipboard copy fallback.** Copy buttons (snippets, responses, endpoint link)
+  fall back to a `textarea` + `execCommand` copy so they work outside secure
+  contexts and on older browsers.
+- **Snippet highlighting.** Syntax colouring now recognizes `//` comments and the
+  keywords used by the newly added languages.
+
 ## [1.2.0] - 2026-06-25
 
 ### Added

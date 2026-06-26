@@ -161,6 +161,27 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Extension hooks
+    |--------------------------------------------------------------------------
+    |
+    | Custom extraction strategies are resolved from the container and inserted
+    | before ExtractAttributes, so explicit attributes can still override them.
+    | OpenAPI transformers receive the generated spec array and may return a
+    | modified array; use them for organization-specific naming or metadata.
+    |
+    */
+
+    'extensions' => [
+        'strategies' => [
+            // App\Documentator\ExtractTenantMetadata::class,
+        ],
+        'openapi_transformers' => [
+            // App\Documentator\AddInternalMetadata::class,
+        ],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Authentication schemes
     |--------------------------------------------------------------------------
     |

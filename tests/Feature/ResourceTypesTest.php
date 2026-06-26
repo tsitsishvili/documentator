@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 use Illuminate\Http\Resources\Json\ResourceCollection;
 use Illuminate\Support\Facades\Route;
@@ -50,6 +51,18 @@ class WidgetCollection extends ResourceCollection
     public $collects = WidgetResource::class;
 }
 
+class LinklessWidgetCollection extends ResourceCollection
+{
+    public $collects = WidgetResource::class;
+
+    public function paginationInformation(Request $request, array $paginated, array $default): array
+    {
+        unset($default['links'], $default['meta']['links']);
+
+        return $default;
+    }
+}
+
 class WidgetShowController
 {
     public function show(): WidgetResource
@@ -65,10 +78,21 @@ class WidgetIndexController
         return new WidgetCollection(collect());
     }
 
+    public function linkless(): LinklessWidgetCollection
+    {
+        return new LinklessWidgetCollection(collect());
+    }
+
     #[Response(200, resource: WidgetResource::class, paginated: true)]
     public function paged(): void
     {
         //
+    }
+
+    #[Response(200, resource: WidgetResource::class, paginated: true)]
+    public function linklessPaged(): LinklessWidgetCollection
+    {
+        return new LinklessWidgetCollection(collect());
     }
 }
 
@@ -111,6 +135,16 @@ it('wraps a ResourceCollection return type in the paginator envelope', function 
         ->and($schema['properties']['links'])->toHaveKey('properties');
 });
 
+it('honours ResourceCollection paginationInformation when inferring the paginator envelope', function () {
+    Route::get('api/widgets/linkless', [WidgetIndexController::class, 'linkless']);
+
+    $schema = widgetSchema('/api/widgets/linkless');
+
+    expect($schema['properties'])->not->toHaveKey('links')
+        ->and($schema['properties']['meta']['properties'])->not->toHaveKey('links')
+        ->and($schema['properties']['meta']['properties']['total']['type'])->toBe('integer');
+});
+
 it('wraps a #[Response(paginated: true)] resource in the paginator envelope', function () {
     Route::get('api/widgets/paged', [WidgetIndexController::class, 'paged']);
 
@@ -118,4 +152,14 @@ it('wraps a #[Response(paginated: true)] resource in the paginator envelope', fu
 
     expect($schema['properties']['data']['items']['properties']['price']['type'])->toBe('number')
         ->and($schema['properties']['meta']['properties']['current_page']['type'])->toBe('integer');
+});
+
+it('honours ResourceCollection paginationInformation for paginated response attributes', function () {
+    Route::get('api/widgets/linkless-paged', [WidgetIndexController::class, 'linklessPaged']);
+
+    $schema = widgetSchema('/api/widgets/linkless-paged');
+
+    expect($schema['properties'])->not->toHaveKey('links')
+        ->and($schema['properties']['meta']['properties'])->not->toHaveKey('links')
+        ->and($schema['properties']['data']['items']['properties']['price']['type'])->toBe('number');
 });

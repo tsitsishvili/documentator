@@ -5,9 +5,16 @@ declare(strict_types=1);
 namespace Tsitsishvili\Documentator\Extraction\Strategies;
 
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 use Illuminate\Http\Resources\Json\JsonResource;
 use Illuminate\Http\Resources\Json\ResourceCollection;
 use Illuminate\Routing\Route;
+use PhpParser\Node;
+use PhpParser\NodeFinder;
+use PhpParser\NodeTraverser;
+use PhpParser\NodeVisitor\NameResolver;
+use PhpParser\Parser;
+use PhpParser\ParserFactory;
 use ReflectionClass;
 use ReflectionMethod;
 use ReflectionNamedType;
@@ -26,12 +33,40 @@ use Tsitsishvili\Documentator\OpenApi\ResourceSchemaExtractor;
  */
 final class ExtractResponses implements ExtractionStrategy
 {
-    public function __construct(private readonly ResourceSchemaExtractor $schemas) {}
+    private readonly Parser $parser;
+
+    public function __construct(private readonly ResourceSchemaExtractor $schemas)
+    {
+        $this->parser = (new ParserFactory)->createForHostVersion();
+    }
 
     public function __invoke(EndpointData $endpoint, Route $route, ?ReflectionMethod $method): EndpointData
     {
         if ($method === null) {
             return $endpoint;
+        }
+
+        // A body-bearing success is 200 unless the verb conventionally creates
+        // (POST -> 201); a 204 is reserved for the empty-body fallback.
+        $status = in_array('post', $endpoint->verbs(), true) && $this->infersStatus() ? 201 : 200;
+
+        if (($collection = $this->resourceCollectionCall($method)) !== null) {
+            $resource = $collection['resource'];
+            $paginated = $collection['paginated'];
+            $endpoint->responses[$status] ??= new ResponseData(
+                status: $status,
+                description: $this->describe($status),
+                resource: $resource,
+                schema: $paginated
+                    ? PaginationSchema::paginated($this->schemas->extract($resource), null)
+                    : PaginationSchema::collection($this->schemas->extract($resource)),
+            );
+
+            if ($paginated) {
+                foreach (PaginationSchema::queryParameters() as $name => $param) {
+                    $endpoint->queryParameters[$name] ??= $param;
+                }
+            }
         }
 
         $returnType = $method->getReturnType();
@@ -42,16 +77,17 @@ final class ExtractResponses implements ExtractionStrategy
 
         $class = $returnType->getName();
 
-        // A body-bearing success is 200 unless the verb conventionally creates
-        // (POST -> 201); a 204 is reserved for the empty-body fallback.
-        $status = in_array('post', $endpoint->verbs(), true) && $this->infersStatus() ? 201 : 200;
+        if ($class === AnonymousResourceCollection::class) {
+            return $endpoint;
+        }
 
         if (is_subclass_of($class, ResourceCollection::class)) {
             $endpoint->responses[$status] ??= new ResponseData(
                 status: $status,
                 description: $this->describe($status),
                 resource: $class,
-                schema: PaginationSchema::paginated($this->collectsSchema($class)),
+                schema: PaginationSchema::paginated($this->collectsSchema($class), $class),
+                collection: $class,
             );
 
             foreach (PaginationSchema::queryParameters() as $name => $param) {
@@ -83,6 +119,81 @@ final class ExtractResponses implements ExtractionStrategy
     private function describe(int $status): string
     {
         return $status === 201 ? 'Created' : 'Successful response';
+    }
+
+    /**
+     * @return array{resource: class-string<JsonResource>, paginated: bool}|null
+     */
+    private function resourceCollectionCall(ReflectionMethod $method): ?array
+    {
+        $return = $this->returnExpression($method);
+
+        if (! $return instanceof Node\Expr\StaticCall
+            || ! $return->class instanceof Node\Name
+            || ! $return->name instanceof Node\Identifier
+            || $return->name->toString() !== 'collection') {
+            return null;
+        }
+
+        $resource = $return->class->toString();
+
+        if (! is_subclass_of($resource, JsonResource::class)) {
+            return null;
+        }
+
+        return [
+            'resource' => $resource,
+            'paginated' => isset($return->args[0]) && $this->containsPaginatorCall($return->args[0]->value),
+        ];
+    }
+
+    private function returnExpression(ReflectionMethod $method): ?Node\Expr
+    {
+        $file = $method->getFileName();
+
+        if ($file === false) {
+            return null;
+        }
+
+        try {
+            $ast = $this->parser->parse((string) file_get_contents($file));
+
+            if ($ast === null) {
+                return null;
+            }
+
+            $ast = (new NodeTraverser(new NameResolver))->traverse($ast);
+        } catch (Throwable) {
+            return null;
+        }
+
+        $methodNode = (new NodeFinder)->findFirst(
+            $ast,
+            fn (Node $node) => $node instanceof Node\Stmt\ClassMethod
+                && $node->name->toString() === $method->getName()
+                && $node->getStartLine() === $method->getStartLine(),
+        );
+
+        if (! $methodNode instanceof Node\Stmt\ClassMethod) {
+            return null;
+        }
+
+        $return = (new NodeFinder)->findFirst(
+            $methodNode,
+            fn (Node $node) => $node instanceof Node\Stmt\Return_ && $node->expr instanceof Node\Expr,
+        );
+
+        return $return instanceof Node\Stmt\Return_ && $return->expr instanceof Node\Expr ? $return->expr : null;
+    }
+
+    private function containsPaginatorCall(Node\Expr $expr): bool
+    {
+        return (new NodeFinder)->findFirst(
+            $expr,
+            fn (Node $node) => $node instanceof Node\Expr\MethodCall
+                && $node->name instanceof Node\Identifier
+                && in_array($node->name->toString(), ['paginate', 'simplePaginate', 'cursorPaginate'], true),
+        ) !== null;
     }
 
     /**

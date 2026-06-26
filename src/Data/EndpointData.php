@@ -46,6 +46,9 @@ final class EndpointData
 
     public ?string $securityScheme = null;
 
+    /** @var array<int, string> */
+    public array $securityScopes = [];
+
     public bool $hidden = false;
 
     public bool $deprecated = false;

@@ -731,6 +731,7 @@
         var deprecated = op.deprecated ? '<span class="badge-deprecated">Deprecated</span>' : '';
         html += '<div class="request-line"><span class="method m-' + entry.method + '">' + entry.method + '</span>' +
             '<span class="path">' + pathSegments(entry.path) + '</span>' + deprecated +
+            '<button class="endpoint__link" id="endpointLink" type="button" title="Copy endpoint link">Link</button>' +
             '<button class="endpoint__try" id="endpointTry" type="button">Try it</button></div>';
         html += '<h1 class="endpoint__summary">' + esc(op.summary || entry.path) + '</h1>';
         html += '<div class="endpoint__meta">' +
@@ -795,6 +796,17 @@
         document.getElementById('doc').innerHTML = html;
         document.getElementById('doc').scrollTop = 0;
         document.getElementById('endpointTry').addEventListener('click', openConsole);
+        document.getElementById('endpointLink').addEventListener('click', function () { copyEndpointLink(entry); });
+    }
+
+    function copyEndpointLink(entry) {
+        var btn = document.getElementById('endpointLink');
+        var url = location.origin + location.pathname + '#' + encodeURIComponent(entry.slug || slugFor(entry));
+
+        copyText(url, function () {
+            btn.textContent = 'Copied';
+            setTimeout(function () { btn.textContent = 'Link'; }, 1400);
+        });
     }
 
     /* ---------- console ---------- */
@@ -1074,6 +1086,24 @@
             return pad(depth) + '"' + k.replace(/"/g, '\\"') + '": ' + toPython(value[k], depth + 1) + ',';
         }).join('\n') + '\n' + pad(depth - 1) + '}';
     }
+    function jsonLiteral(value) {
+        return JSON.stringify(value, null, 2);
+    }
+    function sq(value) {
+        return String(value).replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+    }
+    function dq(value) {
+        return String(value).replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+    }
+    function tick(value) {
+        return String(value).replace(/`/g, '\\`');
+    }
+    function javaTextBlock(value, indent) {
+        indent = indent || '';
+        return '"""\n' + String(value).split('\n').map(function (line) {
+            return indent + line;
+        }).join('\n') + '\n' + indent.replace(/  $/, '') + '"""';
+    }
 
     function buildCurl(req) {
         var parts = ["curl -X " + req.method.toUpperCase() + " '" + req.url + "'"];
@@ -1184,6 +1214,174 @@
 
         return 'import requests\n\nresponse = requests.' + req.method.toLowerCase() +
             '(\n' + args.join('\n') + '\n)\nprint(response.json())';
+    }
+
+    function buildHttpie(req) {
+        var parts = ['http ' + req.method.toUpperCase() + ' "' + req.url.replace(/"/g, '\\"') + '"'];
+        Object.keys(req.headers).forEach(function (k) {
+            parts.push('  "' + k.replace(/"/g, '\\"') + ':' + String(req.headers[k]).replace(/"/g, '\\"') + '"');
+        });
+
+        var b = req.body;
+        if (b.mode === 'json') {
+            Object.keys(b.value).forEach(function (k) {
+                var v = b.value[k];
+                parts.push('  ' + k + ':=' + JSON.stringify(v));
+            });
+        } else if (b.mode === 'raw') {
+            parts.push("  <<< '" + b.value.replace(/\n\s*/g, '') + "'");
+        } else if (b.mode === 'multipart') {
+            b.fields.forEach(function (f) { parts.push('  ' + f.name + '=' + JSON.stringify(String(f.value))); });
+            b.files.forEach(function (f) { fileNames(f).forEach(function (fn) { parts.push('  ' + f.name + '@' + fn); }); });
+        }
+
+        return parts.join(' \\\n');
+    }
+
+    function buildRuby(req) {
+        var b = req.body;
+        var headers = {};
+        Object.keys(req.headers).forEach(function (k) { headers[k] = req.headers[k]; });
+        var lines = ["require 'net/http'", "require 'json'", '', "uri = URI('" + sq(req.url) + "')"];
+
+        if (b.mode === 'multipart') {
+            lines.push("request = Net::HTTP::" + req.method.charAt(0).toUpperCase() + req.method.slice(1).toLowerCase() + '.new(uri)');
+            Object.keys(headers).forEach(function (k) { lines.push("request['" + sq(k) + "'] = '" + sq(headers[k]) + "'"); });
+            lines.push('# Multipart file uploads are usually easier with a client gem such as Faraday.');
+            lines.push('# Fields: ' + JSON.stringify(fieldsToObject(b.fields)));
+            b.files.forEach(function (f) { lines.push("# Attach " + f.name + ': ' + fileNames(f).join(', ')); });
+        } else {
+            lines.push("request = Net::HTTP::" + req.method.charAt(0).toUpperCase() + req.method.slice(1).toLowerCase() + '.new(uri)');
+            Object.keys(headers).forEach(function (k) { lines.push("request['" + sq(k) + "'] = '" + sq(headers[k]) + "'"); });
+            if (b.mode === 'json') lines.push('request.body = JSON.generate(' + JSON.stringify(b.value) + ')');
+            else if (b.mode === 'raw') lines.push('request.body = ' + JSON.stringify(b.value));
+        }
+
+        lines.push('');
+        lines.push('response = Net::HTTP.start(uri.hostname, uri.port, use_ssl: uri.scheme == "https") do |http|');
+        lines.push('  http.request(request)');
+        lines.push('end');
+        lines.push('');
+        lines.push('puts response.body');
+        return lines.join('\n');
+    }
+
+    function buildGo(req) {
+        var b = req.body;
+        var headers = {};
+        Object.keys(req.headers).forEach(function (k) { headers[k] = req.headers[k]; });
+        var imports = ['"fmt"', '"io"', '"net/http"'];
+        var setup = [];
+        var bodyExpr = 'nil';
+
+        if (b.mode === 'json' || b.mode === 'raw') {
+            imports.push('"bytes"');
+            var payload = b.mode === 'json' ? jsonLiteral(b.value) : b.value;
+            setup.push('payload := []byte(`' + tick(payload) + '`)');
+            bodyExpr = 'bytes.NewBuffer(payload)';
+        } else if (b.mode === 'multipart') {
+            imports = ['"bytes"', '"fmt"', '"io"', '"mime/multipart"', '"net/http"', '"os"'];
+            setup.push('body := &bytes.Buffer{}');
+            setup.push('writer := multipart.NewWriter(body)');
+            b.fields.forEach(function (f) { setup.push('writer.WriteField("' + dq(f.name) + '", "' + dq(f.value) + '")'); });
+            b.files.forEach(function (f) {
+                fileNames(f).forEach(function (fn) {
+                    setup.push('file, _ := os.Open("' + dq(fn) + '")');
+                    setup.push('defer file.Close()');
+                    setup.push('part, _ := writer.CreateFormFile("' + dq(f.name) + '", "' + dq(fn.split('/').pop()) + '")');
+                    setup.push('io.Copy(part, file)');
+                });
+            });
+            setup.push('writer.Close()');
+            headers['Content-Type'] = 'writer.FormDataContentType()';
+            bodyExpr = 'body';
+        }
+
+        var lines = ['package main', '', 'import (']
+            .concat(imports.sort().map(function (i) { return '  ' + i; }))
+            .concat([')', '', 'func main() {']);
+        setup.forEach(function (line) { lines.push('  ' + line); });
+        if (setup.length) lines.push('');
+        lines.push('  req, _ := http.NewRequest("' + req.method.toUpperCase() + '", "' + dq(req.url) + '", ' + bodyExpr + ')');
+        Object.keys(headers).forEach(function (k) {
+            var v = headers[k];
+            if (v === 'writer.FormDataContentType()') lines.push('  req.Header.Set("' + dq(k) + '", writer.FormDataContentType())');
+            else lines.push('  req.Header.Set("' + dq(k) + '", "' + dq(v) + '")');
+        });
+        lines.push('');
+        lines.push('  resp, _ := http.DefaultClient.Do(req)');
+        lines.push('  defer resp.Body.Close()');
+        lines.push('  data, _ := io.ReadAll(resp.Body)');
+        lines.push('  fmt.Println(string(data))');
+        lines.push('}');
+        return lines.join('\n');
+    }
+
+    function buildJava(req) {
+        var b = req.body;
+        var headers = {};
+        Object.keys(req.headers).forEach(function (k) { headers[k] = req.headers[k]; });
+        var lines = [
+            'import java.net.URI;',
+            'import java.net.http.HttpClient;',
+            'import java.net.http.HttpRequest;',
+            'import java.net.http.HttpResponse;',
+            '',
+            'var client = HttpClient.newHttpClient();',
+        ];
+        var publisher = 'HttpRequest.BodyPublishers.noBody()';
+
+        if (b.mode === 'json' || b.mode === 'raw') {
+            var payload = b.mode === 'json' ? jsonLiteral(b.value) : b.value;
+            lines.push('var body = ' + javaTextBlock(payload, '  ') + ';');
+            publisher = 'HttpRequest.BodyPublishers.ofString(body)';
+        } else if (b.mode === 'multipart') {
+            lines.push('// Build multipart/form-data with your preferred encoder, then pass it as the body publisher.');
+            lines.push('// Fields: ' + JSON.stringify(fieldsToObject(b.fields)));
+            b.files.forEach(function (f) { lines.push('// Attach ' + f.name + ': ' + fileNames(f).join(', ')); });
+        }
+
+        lines.push('');
+        lines.push('var request = HttpRequest.newBuilder()');
+        lines.push('  .uri(URI.create("' + dq(req.url) + '"))');
+        Object.keys(headers).forEach(function (k) { lines.push('  .header("' + dq(k) + '", "' + dq(headers[k]) + '")'); });
+        lines.push('  .method("' + req.method.toUpperCase() + '", ' + publisher + ')');
+        lines.push('  .build();');
+        lines.push('');
+        lines.push('var response = client.send(request, HttpResponse.BodyHandlers.ofString());');
+        lines.push('System.out.println(response.body());');
+        return lines.join('\n');
+    }
+
+    function buildCsharp(req) {
+        var b = req.body;
+        var headers = {};
+        Object.keys(req.headers).forEach(function (k) { headers[k] = req.headers[k]; });
+        var lines = ['using System.Net.Http;', 'using System.Text;', '', 'using var client = new HttpClient();'];
+        var content = 'null';
+
+        if (b.mode === 'json' || b.mode === 'raw') {
+            var payload = b.mode === 'json' ? jsonLiteral(b.value) : b.value;
+            lines.push('var body = """');
+            lines = lines.concat(String(payload).split('\n'));
+            lines.push('""";');
+            content = 'new StringContent(body, Encoding.UTF8, "application/json")';
+        } else if (b.mode === 'multipart') {
+            lines.push('using var form = new MultipartFormDataContent();');
+            b.fields.forEach(function (f) { lines.push('form.Add(new StringContent("' + dq(f.value) + '"), "' + dq(f.name) + '");'); });
+            b.files.forEach(function (f) { fileNames(f).forEach(function (fn) { lines.push('// form.Add(new StreamContent(File.OpenRead("' + dq(fn) + '")), "' + dq(f.name) + '", "' + dq(fn.split('/').pop()) + '");'); }); });
+            content = 'form';
+            delete headers['Content-Type'];
+        }
+
+        Object.keys(headers).forEach(function (k) {
+            if (k.toLowerCase() !== 'content-type') lines.push('client.DefaultRequestHeaders.Add("' + dq(k) + '", "' + dq(headers[k]) + '");');
+        });
+        lines.push('');
+        lines.push('var response = await client.SendAsync(new HttpRequestMessage(HttpMethod.' +
+            req.method.charAt(0).toUpperCase() + req.method.slice(1).toLowerCase() + ', "' + dq(req.url) + '") { Content = ' + content + ' });');
+        lines.push('Console.WriteLine(await response.Content.ReadAsStringAsync());');
+        return lines.join('\n');
     }
 
     /* ---------- TypeScript types ---------- */
@@ -1411,10 +1609,15 @@
         js: { label: 'JS', build: buildJs },
         typescript: { label: 'TypeScript', build: buildTypeScript },
         python: { label: 'Python', build: buildPython },
+        go: { label: 'Go', build: buildGo },
+        ruby: { label: 'Ruby', build: buildRuby },
+        java: { label: 'Java', build: buildJava },
+        csharp: { label: 'C#', build: buildCsharp },
+        httpie: { label: 'HTTPie', build: buildHttpie },
     };
     /* Languages shown as tabs; the rest live in the "Other" dropdown. */
     var PRIMARY_LANGS = ['curl', 'php', 'js', 'typescript'];
-    var OTHER_LANGS = ['python'];
+    var OTHER_LANGS = ['python', 'go', 'ruby', 'java', 'csharp', 'httpie'];
     var LANG_ORDER = PRIMARY_LANGS.concat(OTHER_LANGS);
 
     function activeLang() {
@@ -1448,12 +1651,12 @@
         updateSnippet();
     }
 
-    /* Lightweight, language-agnostic syntax colouring for the request snippets
-       (curl / PHP / JS / Python). Escape-first like highlightJson: it runs on
+    /* Lightweight, language-agnostic syntax colouring for the request snippets.
+       Escape-first like highlightJson: it runs on
        already-escaped text and wraps tokens in the fixed tok-* span set, so
        textContent (what Copy reads) still returns the verbatim source. */
     function highlightCode(escaped) {
-        var re = /(#[^\n]*)|(&quot;(?:\\.|(?!&quot;).)*&quot;|&#39;(?:\\.|(?!&#39;).)*&#39;)|\b(true|false|null|None|True|False|const|let|var|await|async|function|return|use|import|from|new|print|def|class|interface|type|Promise|throw|void|extends|as)\b|(\b\d+(?:\.\d+)?\b)/g;
+        var re = /(\/\/[^\n]*|#[^\n]*)|(&quot;(?:\\.|(?!&quot;).)*&quot;|&#39;(?:\\.|(?!&#39;).)*&#39;)|\b(true|false|null|None|True|False|nil|const|let|var|await|async|function|return|use|using|import|from|new|print|puts|def|class|interface|type|Promise|throw|void|extends|as|package|func|defer|public|static|final)\b|(\b\d+(?:\.\d+)?\b)/g;
         return escaped.replace(re, function (m, comment, str, kw, num) {
             if (comment) return '<span class="tok-comment">' + comment + '</span>';
             if (str) return '<span class="tok-str">' + str + '</span>';
@@ -1471,12 +1674,33 @@
     function copySnippet() {
         var text = document.getElementById('snippetCode').textContent;
         var btn = document.getElementById('snippetCopy');
-        if (navigator.clipboard) {
-            navigator.clipboard.writeText(text).then(function () {
-                btn.textContent = 'Copied';
-                setTimeout(function () { btn.textContent = 'Copy'; }, 1400);
-            });
+        copyText(text, function () {
+            btn.textContent = 'Copied';
+            setTimeout(function () { btn.textContent = 'Copy'; }, 1400);
+        });
+    }
+
+    function copyText(text, done) {
+        fallbackCopy(text, done);
+    }
+
+    function fallbackCopy(text, done) {
+        var textarea = document.createElement('textarea');
+        textarea.value = text;
+        textarea.setAttribute('readonly', '');
+        textarea.style.position = 'fixed';
+        textarea.style.left = '-9999px';
+        document.body.appendChild(textarea);
+        textarea.select();
+
+        try {
+            document.execCommand('copy');
+            done();
+        } catch (e) {
+            // Ignore: the button simply keeps its original label.
         }
+
+        document.body.removeChild(textarea);
     }
 
     /* ---------- send ---------- */
@@ -1682,8 +1906,7 @@
         if (btn) btn.addEventListener('click', function (e) {
             e.preventDefault();
             e.stopPropagation(); // don't toggle the <details>
-            if (!navigator.clipboard) return;
-            navigator.clipboard.writeText(body).then(function () {
+            copyText(body, function () {
                 btn.textContent = 'Copied';
                 setTimeout(function () { btn.textContent = 'Copy'; }, 1400);
             });

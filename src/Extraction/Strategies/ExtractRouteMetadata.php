@@ -43,9 +43,10 @@ final class ExtractRouteMetadata implements ExtractionStrategy
             );
         }
 
-        if ($this->hasAuthMiddleware($route)) {
+        if (($scheme = $this->authScheme($route)) !== null) {
             $endpoint->authenticated = true;
-            $endpoint->securityScheme = 'default';
+            $endpoint->securityScheme = $scheme;
+            $endpoint->securityScopes = $this->securityScopes($route);
         }
 
         return $endpoint;
@@ -184,14 +185,51 @@ final class ExtractRouteMetadata implements ExtractionStrategy
         return null;
     }
 
-    private function hasAuthMiddleware(Route $route): bool
+    private function authScheme(Route $route): ?string
     {
         foreach ($route->gatherMiddleware() as $middleware) {
-            if (is_string($middleware) && Str::startsWith($middleware, ['auth', 'auth:'])) {
-                return true;
+            if (! is_string($middleware) || ! Str::startsWith($middleware, ['auth', 'auth:'])) {
+                continue;
+            }
+
+            $guard = Str::after($middleware, 'auth:');
+
+            if ($guard !== $middleware) {
+                $guard = trim(Str::before($guard, ','));
+                $schemes = (array) config('documentator.security', []);
+
+                if ($guard !== '' && array_key_exists($guard, $schemes)) {
+                    return $guard;
+                }
+            }
+
+            return 'default';
+        }
+
+        return null;
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function securityScopes(Route $route): array
+    {
+        $scopes = [];
+
+        foreach ($route->gatherMiddleware() as $middleware) {
+            if (! is_string($middleware) || ! Str::startsWith($middleware, ['abilities:', 'ability:', 'scopes:', 'scope:'])) {
+                continue;
+            }
+
+            foreach (explode(',', Str::after($middleware, ':')) as $scope) {
+                $scope = trim($scope);
+
+                if ($scope !== '') {
+                    $scopes[] = $scope;
+                }
             }
         }
 
-        return false;
+        return array_values(array_unique($scopes));
     }
 }
