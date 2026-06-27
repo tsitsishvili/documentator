@@ -47,5 +47,5 @@ it('types fields from the model @property docblock when not cast', function () {
 
     expect($props['title']['type'])->toBe('string')
         ->and($props['views']['type'])->toBe('integer')
-        ->and($props['reviewed_at'])->toBe(['type' => 'string', 'format' => 'date-time', 'nullable' => true]);
+        ->and($props['reviewed_at'])->toBe(['type' => ['string', 'null'], 'format' => 'date-time']);
 });

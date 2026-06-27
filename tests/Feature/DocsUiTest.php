@@ -19,6 +19,15 @@ it('serves the built-in explorer shell by default', function () {
         ->toContain('openapi.json');
 });
 
+it('passes the configured auth storage mode to the built-in explorer', function () {
+    config(['documentator.ui.auth_storage' => 'session']);
+
+    $response = $this->get('/docs');
+
+    $response->assertOk();
+    expect($response->getContent())->toContain('authStorage: "session"');
+});
+
 it('serves the built-in CSS and JS assets', function () {
     $this->get('/docs/assets/app.css')
         ->assertOk()

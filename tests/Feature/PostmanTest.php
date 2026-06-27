@@ -27,6 +27,14 @@ it('converts an OpenAPI document into a Postman v2.1 collection', function () {
                     'responses' => ['200' => ['description' => 'ok']],
                 ],
             ],
+            '/api/v2/orders' => [
+                'get' => [
+                    'tags' => ['Orders'],
+                    'x-documentator-group-version' => 'v2',
+                    'summary' => 'Get v2 orders',
+                    'responses' => ['200' => ['description' => 'ok']],
+                ],
+            ],
         ],
     ];
 
@@ -34,6 +42,7 @@ it('converts an OpenAPI document into a Postman v2.1 collection', function () {
 
     expect($collection['info']['schema'])->toContain('v2.1.0')
         ->and($collection['item'][0]['name'])->toBe('Orders')
+        ->and($collection['item'][1]['name'])->toBe('Orders v2')
         ->and($collection['variable'])->toContain(['key' => 'baseUrl', 'value' => 'https://api.acme.test']);
 
     $get = $collection['item'][0]['item'][0];
@@ -46,4 +55,46 @@ it('converts an OpenAPI document into a Postman v2.1 collection', function () {
     expect($post['request']['method'])->toBe('POST')
         ->and($post['request']['body']['mode'])->toBe('raw')
         ->and($post['request']['body']['raw'])->toContain('note');
+});
+
+it('maps OpenAPI security requirements to Postman auth', function () {
+    $openapi = [
+        'info' => ['title' => 'Acme'],
+        'security' => [['apiKey' => []]],
+        'components' => [
+            'securitySchemes' => [
+                'apiKey' => ['type' => 'apiKey', 'in' => 'header', 'name' => 'X-API-Key'],
+                'basic' => ['type' => 'http', 'scheme' => 'basic'],
+            ],
+        ],
+        'paths' => [
+            '/api/inherited' => [
+                'get' => [
+                    'tags' => ['Auth'],
+                    'responses' => ['200' => ['description' => 'ok']],
+                ],
+            ],
+            '/api/public' => [
+                'get' => [
+                    'tags' => ['Auth'],
+                    'security' => [],
+                    'responses' => ['200' => ['description' => 'ok']],
+                ],
+            ],
+            '/api/basic' => [
+                'get' => [
+                    'tags' => ['Auth'],
+                    'security' => [['basic' => []]],
+                    'responses' => ['200' => ['description' => 'ok']],
+                ],
+            ],
+        ],
+    ];
+
+    $requests = (new PostmanGenerator)->generate($openapi)['item'][0]['item'];
+
+    expect($requests[0]['request']['auth']['type'])->toBe('apikey')
+        ->and($requests[0]['request']['auth']['apikey'][0]['value'])->toBe('X-API-Key')
+        ->and($requests[1]['request'])->not->toHaveKey('auth')
+        ->and($requests[2]['request']['auth']['type'])->toBe('basic');
 });

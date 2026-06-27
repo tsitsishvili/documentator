@@ -11,10 +11,6 @@ use Illuminate\Http\Resources\Json\ResourceCollection;
 use Illuminate\Routing\Route;
 use PhpParser\Node;
 use PhpParser\NodeFinder;
-use PhpParser\NodeTraverser;
-use PhpParser\NodeVisitor\NameResolver;
-use PhpParser\Parser;
-use PhpParser\ParserFactory;
 use ReflectionClass;
 use ReflectionMethod;
 use ReflectionNamedType;
@@ -22,6 +18,7 @@ use Throwable;
 use Tsitsishvili\Documentator\Data\EndpointData;
 use Tsitsishvili\Documentator\Data\ResponseData;
 use Tsitsishvili\Documentator\Extraction\ExtractionStrategy;
+use Tsitsishvili\Documentator\Extraction\Support\SourceAnalyzer;
 use Tsitsishvili\Documentator\OpenApi\PaginationSchema;
 use Tsitsishvili\Documentator\OpenApi\ResourceSchemaExtractor;
 
@@ -33,12 +30,10 @@ use Tsitsishvili\Documentator\OpenApi\ResourceSchemaExtractor;
  */
 final class ExtractResponses implements ExtractionStrategy
 {
-    private readonly Parser $parser;
-
-    public function __construct(private readonly ResourceSchemaExtractor $schemas)
-    {
-        $this->parser = (new ParserFactory)->createForHostVersion();
-    }
+    public function __construct(
+        private readonly ResourceSchemaExtractor $schemas,
+        private readonly SourceAnalyzer $source,
+    ) {}
 
     public function __invoke(EndpointData $endpoint, Route $route, ?ReflectionMethod $method): EndpointData
     {
@@ -149,41 +144,7 @@ final class ExtractResponses implements ExtractionStrategy
 
     private function returnExpression(ReflectionMethod $method): ?Node\Expr
     {
-        $file = $method->getFileName();
-
-        if ($file === false) {
-            return null;
-        }
-
-        try {
-            $ast = $this->parser->parse((string) file_get_contents($file));
-
-            if ($ast === null) {
-                return null;
-            }
-
-            $ast = (new NodeTraverser(new NameResolver))->traverse($ast);
-        } catch (Throwable) {
-            return null;
-        }
-
-        $methodNode = (new NodeFinder)->findFirst(
-            $ast,
-            fn (Node $node) => $node instanceof Node\Stmt\ClassMethod
-                && $node->name->toString() === $method->getName()
-                && $node->getStartLine() === $method->getStartLine(),
-        );
-
-        if (! $methodNode instanceof Node\Stmt\ClassMethod) {
-            return null;
-        }
-
-        $return = (new NodeFinder)->findFirst(
-            $methodNode,
-            fn (Node $node) => $node instanceof Node\Stmt\Return_ && $node->expr instanceof Node\Expr,
-        );
-
-        return $return instanceof Node\Stmt\Return_ && $return->expr instanceof Node\Expr ? $return->expr : null;
+        return $this->source->firstReturnExpression($method);
     }
 
     private function containsPaginatorCall(Node\Expr $expr): bool

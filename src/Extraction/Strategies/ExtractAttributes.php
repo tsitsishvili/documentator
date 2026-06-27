@@ -52,7 +52,9 @@ final class ExtractAttributes implements ExtractionStrategy
         $class = $method->getDeclaringClass();
 
         foreach ($class->getAttributes(Group::class) as $attribute) {
-            $endpoint->group = $attribute->newInstance()->name;
+            $group = $attribute->newInstance();
+            $endpoint->group = $group->name;
+            $endpoint->groupVersion = $group->version;
         }
 
         foreach ($class->getAttributes(Authenticated::class) as $attribute) {
@@ -80,7 +82,9 @@ final class ExtractAttributes implements ExtractionStrategy
         }
 
         foreach ($method->getAttributes(Group::class) as $attribute) {
-            $endpoint->group = $attribute->newInstance()->name;
+            $group = $attribute->newInstance();
+            $endpoint->group = $group->name;
+            $endpoint->groupVersion = $group->version;
         }
 
         foreach ($method->getAttributes(Authenticated::class) as $attribute) {

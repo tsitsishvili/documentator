@@ -16,6 +16,8 @@ use Tsitsishvili\Documentator\Extraction\Strategies\ExtractAttributes;
 use Tsitsishvili\Documentator\Extraction\Strategies\ExtractDataObjects;
 use Tsitsishvili\Documentator\Extraction\Strategies\ExtractErrorResponses;
 use Tsitsishvili\Documentator\Extraction\Strategies\ExtractFormRequestRules;
+use Tsitsishvili\Documentator\Extraction\Strategies\ExtractInlineResponses;
+use Tsitsishvili\Documentator\Extraction\Strategies\ExtractInlineValidationRules;
 use Tsitsishvili\Documentator\Extraction\Strategies\ExtractResponses;
 use Tsitsishvili\Documentator\Extraction\Strategies\ExtractRouteMetadata;
 use Tsitsishvili\Documentator\Http\Controllers\AssetController;
@@ -45,8 +47,10 @@ final class DocumentatorServiceProvider extends ServiceProvider
             return new ExtractorPipeline([
                 $app->make(ExtractRouteMetadata::class),
                 $app->make(ExtractFormRequestRules::class),
+                $app->make(ExtractInlineValidationRules::class),
                 $app->make(ExtractDataObjects::class),
                 $app->make(ExtractResponses::class),
+                $app->make(ExtractInlineResponses::class),
                 $app->make(ExtractErrorResponses::class),
                 ...array_map(
                     fn (string $strategy) => $app->make($strategy),

@@ -36,6 +36,24 @@ class ThingController
     }
 }
 
+#[Group('Products', version: 'v1')]
+class VersionedProductsV1Controller
+{
+    public function index(): void
+    {
+        //
+    }
+}
+
+#[Group('Products', version: 'v2')]
+class VersionedProductsV2Controller
+{
+    public function index(): void
+    {
+        //
+    }
+}
+
 it('infers body params from a FormRequest and applies attribute overrides', function () {
     Route::post('api/things', [ThingController::class, 'store']);
 
@@ -52,4 +70,28 @@ it('infers body params from a FormRequest and applies attribute overrides', func
         ->and($operation['tags'])->toBe(['Things'])
         ->and($props['name']['description'])->toBe('Overridden name')
         ->and($operation['responses'])->toHaveKey('201');
+});
+
+it('lets API versions live on groups without changing the group name', function () {
+    Route::get('api/v1/products', [VersionedProductsV1Controller::class, 'index']);
+    Route::get('api/v2/products', [VersionedProductsV2Controller::class, 'index']);
+
+    $spec = app(Documentator::class)->toOpenApi();
+    $v1 = $spec['paths']['/api/v1/products']['get'];
+    $v2 = $spec['paths']['/api/v2/products']['get'];
+
+    expect($v1['tags'])->toBe(['Products'])
+        ->and($v1['x-documentator-group-version'])->toBe('v1')
+        ->and($v1['operationId'])->toBe('v1VersionedProductsV1ControllerIndex')
+        ->and($v2['tags'])->toBe(['Products'])
+        ->and($v2['x-documentator-group-version'])->toBe('v2')
+        ->and($v2['operationId'])->toBe('v2VersionedProductsV2ControllerIndex')
+        ->and($spec['tags'])->toContain([
+            'name' => 'Products',
+            'x-documentator-version' => 'v1',
+        ])
+        ->and($spec['tags'])->toContain([
+            'name' => 'Products',
+            'x-documentator-version' => 'v2',
+        ]);
 });

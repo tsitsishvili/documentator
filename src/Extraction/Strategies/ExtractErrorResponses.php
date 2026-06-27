@@ -18,6 +18,7 @@ use Tsitsishvili\Documentator\Attributes\Authenticated;
 use Tsitsishvili\Documentator\Data\EndpointData;
 use Tsitsishvili\Documentator\Data\ResponseData;
 use Tsitsishvili\Documentator\Extraction\ExtractionStrategy;
+use Tsitsishvili\Documentator\Extraction\Support\InlineValidationRulesExtractor;
 
 /**
  * Adds the conventional error responses an endpoint can return without anyone
@@ -27,7 +28,7 @@ use Tsitsishvili\Documentator\Extraction\ExtractionStrategy;
  *   403  a type-hinted FormRequest overrides authorize() with a body that can
  *        actually deny (a trivial `return true` override is not a real gate)
  *   404  the route binds a model (implicit route-model binding)
- *   422  a type-hinted FormRequest validates the body
+ *   422  a type-hinted FormRequest or inline validation validates input
  *
  * Each is keyed by status and added with `??=`, so it never clobbers a richer
  * response from another strategy and a later #[Response] always wins. Disable
@@ -37,7 +38,7 @@ final class ExtractErrorResponses implements ExtractionStrategy
 {
     private readonly Parser $parser;
 
-    public function __construct()
+    public function __construct(private readonly InlineValidationRulesExtractor $inlineValidation)
     {
         $this->parser = (new ParserFactory)->createForHostVersion();
     }
@@ -58,13 +59,15 @@ final class ExtractErrorResponses implements ExtractionStrategy
 
         $formRequest = $this->findFormRequest($method);
 
-        if ($formRequest !== null) {
+        if ($formRequest !== null || $this->inlineValidation->rulesFor($method) !== []) {
             $endpoint->responses[422] ??= new ResponseData(
                 status: 422,
                 description: 'Validation error',
                 schema: $this->validationSchema(),
             );
+        }
 
+        if ($formRequest !== null) {
             if ($this->authorizes($formRequest)) {
                 $endpoint->responses[403] ??= $this->messageResponse(403, 'Forbidden');
             }

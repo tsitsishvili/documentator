@@ -43,7 +43,7 @@ it('infers enums, formats, bounds, nullability, nesting and uploads', function (
     expect($props['email']['format'])->toBe('email')
         ->and($props['role']['enum'])->toBe(['admin', 'editor', 'viewer'])
         ->and($props['avatar']['format'])->toBe('binary')
-        ->and($props['age']['nullable'])->toBeTrue()
+        ->and($props['age']['type'])->toBe(['integer', 'null'])
         ->and($props['age']['minimum'])->toEqual(18)
         ->and($props['age']['maximum'])->toEqual(120);
 

@@ -31,7 +31,7 @@ final class RouteCollector
     {
         $routes = [];
 
-        foreach ($this->router->getRoutes() as $route) {
+        foreach ($this->router->getRoutes()->getRoutes() as $route) {
             if ($this->shouldDocument($route)) {
                 $routes[] = $route;
             }

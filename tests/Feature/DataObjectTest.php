@@ -60,8 +60,8 @@ it('infers body params and a response schema from Data objects', function () {
 
     expect($props['name']['type'])->toBe('string')
         ->and($props['status']['enum'])->toBe(['active', 'inactive'])
-        ->and($props['age'])->toMatchArray(['type' => 'integer', 'nullable' => true])
-        ->and($props['address']['type'])->toBe('object')
+        ->and($props['age'])->toMatchArray(['type' => ['integer', 'null']])
+        ->and($props['address']['type'])->toBe(['object', 'null'])
         ->and($props['address']['properties']['city']['type'])->toBe('string')
         ->and($body['required'])->toContain('name', 'status')
         ->and($body['required'])->not->toContain('age');

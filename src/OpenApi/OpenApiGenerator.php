@@ -42,7 +42,7 @@ final class OpenApiGenerator
         foreach ($endpoints as $endpoint) {
             $path = $this->normalizePath($endpoint->uri);
             $tag = $this->tagFor($endpoint);
-            $tags[$tag] = true;
+            $tags[$this->tagKey($tag, $endpoint->groupVersion)] ??= $this->tag($tag, $endpoint->groupVersion);
 
             foreach ($endpoint->verbs() as $verb) {
                 $paths[$path][$verb] = $this->operation($endpoint, $tag, $globalScheme);
@@ -63,7 +63,7 @@ final class OpenApiGenerator
             'info' => $this->info(),
             'servers' => config('documentator.servers', []),
             'security' => $globalScheme !== null ? [[$globalScheme => []]] : [],
-            'tags' => array_map(fn (string $name) => ['name' => $name], array_keys($tags)),
+            'tags' => array_values($tags),
             'paths' => $paths,
             'components' => $components,
         ]);
@@ -123,6 +123,8 @@ final class OpenApiGenerator
 
     /**
      * @return array<string, mixed>
+     *
+     * @phpstan-impure
      */
     private function operation(EndpointData $endpoint, string $tag, ?string $globalScheme = null): array
     {
@@ -135,6 +137,7 @@ final class OpenApiGenerator
             'requestBody' => $this->requestBody($endpoint),
             'responses' => $this->responses($endpoint),
             'deprecated' => $endpoint->deprecated ?: null,
+            'x-documentator-group-version' => $endpoint->groupVersion,
         ], fn ($value) => $value !== null && $value !== []);
 
         if ($endpoint->authenticated) {
@@ -339,11 +342,11 @@ final class OpenApiGenerator
         $key = $this->componentKey($response);
 
         if ($key === null || ($this->componentCounts[$key] ?? 0) < 2) {
-            return $response->schema ?? ['type' => 'object'];
+            return $this->normalizeSchema($response->schema ?? ['type' => 'object']);
         }
 
         $name = $this->componentName($response, $key);
-        $this->componentSchemas[$name] ??= $response->schema ?? ['type' => 'object'];
+        $this->componentSchemas[$name] ??= $this->normalizeSchema($response->schema ?? ['type' => 'object']);
 
         return ['$ref' => '#/components/schemas/'.$name];
     }
@@ -381,7 +384,7 @@ final class OpenApiGenerator
         $kind = $this->schemaKind($response->schema ?? []);
         $name = $base.($kind === 'Resource' ? '' : $kind);
 
-        if (isset($this->componentSchemas[$name]) && $this->componentSchemas[$name] !== $response->schema) {
+        if (isset($this->componentSchemas[$name]) && $this->componentSchemas[$name] !== $this->normalizeSchema($response->schema ?? [])) {
             $name .= substr(md5($key), 0, 8);
         }
 
@@ -399,7 +402,7 @@ final class OpenApiGenerator
                 $schema['description'] = $param->description;
             }
 
-            return $schema;
+            return $this->normalizeSchema($schema);
         }
 
         $schema = ['type' => $param->type];
@@ -414,6 +417,53 @@ final class OpenApiGenerator
 
         if ($param->example !== null) {
             $schema['example'] = $param->example;
+        }
+
+        return $this->normalizeSchema($schema);
+    }
+
+    /**
+     * OpenAPI 3.1 is JSON Schema-based, so `type: ["string", "null"]` is the
+     * native nullable representation. Extractors keep the simpler internal
+     * `nullable` flag; the public document is normalized here.
+     *
+     * @param  array<string, mixed>  $schema
+     * @return array<string, mixed>
+     */
+    private function normalizeSchema(array $schema): array
+    {
+        foreach (['properties', 'oneOf', 'anyOf', 'allOf'] as $key) {
+            if (! isset($schema[$key]) || ! is_array($schema[$key])) {
+                continue;
+            }
+
+            foreach ($schema[$key] as $name => $child) {
+                if (is_array($child)) {
+                    $schema[$key][$name] = $this->normalizeSchema($child);
+                }
+            }
+        }
+
+        foreach (['items', 'additionalProperties'] as $key) {
+            if (isset($schema[$key]) && is_array($schema[$key])) {
+                $schema[$key] = $this->normalizeSchema($schema[$key]);
+            }
+        }
+
+        if (($schema['nullable'] ?? false) === true) {
+            unset($schema['nullable']);
+
+            if (isset($schema['type'])) {
+                $types = is_array($schema['type']) ? $schema['type'] : [$schema['type']];
+
+                if (! in_array('null', $types, true)) {
+                    $types[] = 'null';
+                }
+
+                $schema['type'] = $types;
+            } elseif (! isset($schema['oneOf'], $schema['anyOf'], $schema['allOf'])) {
+                $schema['type'] = ['null'];
+            }
         }
 
         return $schema;
@@ -436,5 +486,21 @@ final class OpenApiGenerator
         }
 
         return 'Endpoints';
+    }
+
+    private function tagKey(string $name, ?string $version): string
+    {
+        return $version === null ? $name : $name.'|'.$version;
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    private function tag(string $name, ?string $version): array
+    {
+        return array_filter([
+            'name' => $name,
+            'x-documentator-version' => $version,
+        ], fn ($value) => $value !== null);
     }
 }

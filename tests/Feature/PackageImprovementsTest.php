@@ -43,6 +43,20 @@ class ConditionalThingResource extends JsonResource
     }
 }
 
+class LiteralArrayThingResource extends JsonResource
+{
+    public function toArray($request): array
+    {
+        return [
+            'statuses' => ['draft', 'published'],
+            'scores' => [1, 2],
+            'children' => [
+                ['id' => 1, 'name' => 'Ada'],
+            ],
+        ];
+    }
+}
+
 class ImprovementCollectionController
 {
     public function plain(): AnonymousResourceCollection
@@ -137,6 +151,15 @@ it('reads merged and conditional resource fields', function () {
         ->and($props['comments_count']['nullable'])->toBeTrue()
         ->and($props['profile']['properties']['name']['type'])->toBe('string')
         ->and($props['profile']['nullable'])->toBeTrue();
+});
+
+it('infers list item schemas from literal resource arrays', function () {
+    $props = app(ResourceSchemaExtractor::class)->extract(LiteralArrayThingResource::class)['properties'];
+
+    expect($props['statuses']['items']['type'])->toBe('string')
+        ->and($props['scores']['items']['type'])->toBe('integer')
+        ->and($props['children']['items']['properties']['id']['type'])->toBe('integer')
+        ->and($props['children']['items']['properties']['name']['type'])->toBe('string');
 });
 
 it('allows attributes to explicitly drop pagination link blocks', function () {
