@@ -20,6 +20,7 @@
         window.__DOCUMENTATOR__ = {
             specUrl: @json($specUrl),
             title: @json($title),
+            authStorage: @json($authStorage),
         };
     </script>
     <script src="{{ $jsUrl }}" defer></script>

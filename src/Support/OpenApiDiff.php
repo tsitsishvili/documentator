@@ -61,12 +61,34 @@ final class OpenApiDiff
             $location = strtoupper($verb).' '.$path;
             $changes = array_merge(
                 $changes,
+                self::compareSecurity($location, $expected[$verb]['security'] ?? null, $actual[$verb]['security'] ?? null),
                 self::compareParameters($location, $expected[$verb]['parameters'] ?? [], $actual[$verb]['parameters'] ?? []),
+                self::compareRequestBody($location, $expected[$verb]['requestBody'] ?? null, $actual[$verb]['requestBody'] ?? null),
                 self::compareResponses($location, $expected[$verb]['responses'] ?? [], $actual[$verb]['responses'] ?? []),
             );
         }
 
         return $changes;
+    }
+
+    /**
+     * @return array<int, array{severity: string, location: string, message: string}>
+     */
+    private static function compareSecurity(string $location, mixed $expected, mixed $actual): array
+    {
+        if ($expected === $actual) {
+            return [];
+        }
+
+        if (($expected === null || $expected === []) && $actual !== null && $actual !== []) {
+            return [self::change('breaking', $location, 'security requirement added')];
+        }
+
+        if ($expected !== null && ($actual === null || $actual === [])) {
+            return [self::change('non-breaking', $location, 'security requirement removed')];
+        }
+
+        return [self::change('changed', $location, 'security requirement changed')];
     }
 
     /**
@@ -97,11 +119,11 @@ final class OpenApiDiff
                 $changes[] = self::change('breaking', $location, "parameter became required: {$key}");
             }
 
-            $oldType = $expectedByKey[$key]['schema']['type'] ?? null;
-            $newType = $actualByKey[$key]['schema']['type'] ?? null;
+            $oldSchema = $expectedByKey[$key]['schema'] ?? null;
+            $newSchema = $actualByKey[$key]['schema'] ?? null;
 
-            if ($oldType !== null && $newType !== null && $oldType !== $newType) {
-                $changes[] = self::change('breaking', $location, "parameter type changed: {$key} ({$oldType} -> {$newType})");
+            if (is_array($oldSchema) && is_array($newSchema)) {
+                $changes = array_merge($changes, self::compareSchema($location." parameter {$key}", $oldSchema, $newSchema));
             }
         }
 
@@ -124,6 +146,39 @@ final class OpenApiDiff
     }
 
     /**
+     * @return array<int, array{severity: string, location: string, message: string}>
+     */
+    private static function compareRequestBody(string $location, mixed $expected, mixed $actual): array
+    {
+        if (! is_array($expected)) {
+            if (! is_array($actual)) {
+                return [];
+            }
+
+            $severity = ($actual['required'] ?? false) ? 'breaking' : 'non-breaking';
+
+            return [self::change($severity, $location, 'request body added')];
+        }
+
+        if (! is_array($actual)) {
+            return [self::change('breaking', $location, 'request body removed')];
+        }
+
+        $changes = [];
+        $oldRequired = (bool) ($expected['required'] ?? false);
+        $newRequired = (bool) ($actual['required'] ?? false);
+
+        if (! $oldRequired && $newRequired) {
+            $changes[] = self::change('breaking', $location, 'request body became required');
+        }
+
+        return array_merge(
+            $changes,
+            self::compareContentSchemas($location.' request body', $expected['content'] ?? [], $actual['content'] ?? []),
+        );
+    }
+
+    /**
      * @param  array<string, mixed>  $expected
      * @param  array<string, mixed>  $actual
      * @return array<int, array{severity: string, location: string, message: string}>
@@ -141,11 +196,38 @@ final class OpenApiDiff
         }
 
         foreach (array_intersect(array_keys($expected), array_keys($actual)) as $status) {
-            $oldSchema = $expected[$status]['content']['application/json']['schema'] ?? null;
-            $newSchema = $actual[$status]['content']['application/json']['schema'] ?? null;
+            $changes = array_merge(
+                $changes,
+                self::compareContentSchemas($location." response {$status}", $expected[$status]['content'] ?? [], $actual[$status]['content'] ?? []),
+            );
+        }
+
+        return $changes;
+    }
+
+    /**
+     * @param  array<string, mixed>  $expected
+     * @param  array<string, mixed>  $actual
+     * @return array<int, array{severity: string, location: string, message: string}>
+     */
+    private static function compareContentSchemas(string $location, array $expected, array $actual): array
+    {
+        $changes = [];
+
+        foreach (array_diff(array_keys($expected), array_keys($actual)) as $mediaType) {
+            $changes[] = self::change('breaking', $location, "content type removed: {$mediaType}");
+        }
+
+        foreach (array_diff(array_keys($actual), array_keys($expected)) as $mediaType) {
+            $changes[] = self::change('non-breaking', $location, "content type added: {$mediaType}");
+        }
+
+        foreach (array_intersect(array_keys($expected), array_keys($actual)) as $mediaType) {
+            $oldSchema = $expected[$mediaType]['schema'] ?? null;
+            $newSchema = $actual[$mediaType]['schema'] ?? null;
 
             if (is_array($oldSchema) && is_array($newSchema)) {
-                $changes = array_merge($changes, self::compareSchema($location." response {$status}", $oldSchema, $newSchema));
+                $changes = array_merge($changes, self::compareSchema("{$location} {$mediaType}", $oldSchema, $newSchema));
             }
         }
 
@@ -165,11 +247,32 @@ final class OpenApiDiff
             return [self::change('changed', $location, 'schema reference changed')];
         }
 
-        $oldType = $expected['type'] ?? null;
-        $newType = $actual['type'] ?? null;
+        $oldType = self::schemaTypes($expected);
+        $newType = self::schemaTypes($actual);
 
-        if ($oldType !== null && $newType !== null && $oldType !== $newType) {
-            return [self::change('breaking', $location, "schema type changed ({$oldType} -> {$newType})")];
+        if ($oldType !== [] && $newType !== [] && $oldType !== $newType) {
+            return [self::change('breaking', $location, 'schema type changed ('.implode('|', $oldType).' -> '.implode('|', $newType).')')];
+        }
+
+        if (($expected['format'] ?? null) !== ($actual['format'] ?? null)) {
+            return [self::change('breaking', $location, 'schema format changed')];
+        }
+
+        $changes = array_merge($changes, self::compareEnums($location, $expected['enum'] ?? null, $actual['enum'] ?? null));
+
+        $oldRequired = is_array($expected['required'] ?? null) ? $expected['required'] : [];
+        $newRequired = is_array($actual['required'] ?? null) ? $actual['required'] : [];
+
+        foreach (array_diff($newRequired, $oldRequired) as $property) {
+            $changes[] = self::change('breaking', $location, "property became required: {$property}");
+        }
+
+        foreach (array_diff($oldRequired, $newRequired) as $property) {
+            $changes[] = self::change('non-breaking', $location, "property became optional: {$property}");
+        }
+
+        if (is_array($expected['items'] ?? null) && is_array($actual['items'] ?? null)) {
+            $changes = array_merge($changes, self::compareSchema($location.'[]', $expected['items'], $actual['items']));
         }
 
         $oldProps = $expected['properties'] ?? [];
@@ -191,6 +294,48 @@ final class OpenApiDiff
             if (is_array($oldProps[$property]) && is_array($newProps[$property])) {
                 $changes = array_merge($changes, self::compareSchema($location.'.'.$property, $oldProps[$property], $newProps[$property]));
             }
+        }
+
+        return $changes;
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private static function schemaTypes(array $schema): array
+    {
+        $type = $schema['type'] ?? null;
+        $types = is_array($type) ? $type : ($type === null ? [] : [$type]);
+        sort($types);
+
+        return $types;
+    }
+
+    /**
+     * @return array<int, array{severity: string, location: string, message: string}>
+     */
+    private static function compareEnums(string $location, mixed $expected, mixed $actual): array
+    {
+        if (! is_array($expected)) {
+            return is_array($actual)
+                ? [self::change('breaking', $location, 'enum constraint added')]
+                : [];
+        }
+
+        if (! is_array($actual)) {
+            return [self::change('non-breaking', $location, 'enum constraint removed')];
+        }
+
+        $changes = [];
+        $removed = array_udiff($expected, $actual, fn ($a, $b) => strcmp(json_encode($a) ?: '', json_encode($b) ?: ''));
+        $added = array_udiff($actual, $expected, fn ($a, $b) => strcmp(json_encode($a) ?: '', json_encode($b) ?: ''));
+
+        if ($removed !== []) {
+            $changes[] = self::change('breaking', $location, 'enum value removed');
+        }
+
+        if ($added !== []) {
+            $changes[] = self::change('non-breaking', $location, 'enum value added');
         }
 
         return $changes;

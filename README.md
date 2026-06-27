@@ -108,6 +108,20 @@ honours PHP 8.4's native `#[\Deprecated]`). `#[Response(resource: X, paginated: 
 envelope; add `paginationLinks: false` for a custom collection that drops
 Laravel's `links` blocks.
 
+For versioned APIs, keep the group name stable and put the version on the group:
+
+```php
+#[Group('Products', version: 'v2')]
+final class ProductController
+{
+    // ...
+}
+```
+
+Documentator emits the version as `x-documentator-group-version`, shows it as a
+group badge in the built-in UI, and prefixes generated operation IDs with it to
+avoid collisions between versions.
+
 Put `#[UsesModel(Order::class)]` on a Resource to tell the extractor which
 Eloquent model it wraps (otherwise the model is resolved by naming convention,
 configurable via `models_namespace`), so field types come from the model's casts.

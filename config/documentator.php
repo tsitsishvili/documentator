@@ -79,6 +79,7 @@ return [
     'ui' => [
         'driver' => env('DOCUMENTATOR_UI', 'documentator'),
         'assets' => env('DOCUMENTATOR_UI_ASSETS', 'https://cdn.jsdelivr.net/npm/@scalar/api-reference@1.25.0/dist/browser/standalone.min.js'),
+        'auth_storage' => env('DOCUMENTATOR_AUTH_STORAGE', 'local'), // local, session, memory
     ],
 
     /*

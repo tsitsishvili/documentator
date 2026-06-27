@@ -30,6 +30,8 @@ final class EndpointData
 
     public ?string $group = null;
 
+    public ?string $groupVersion = null;
+
     /** @var array<string, ParameterData> */
     public array $pathParameters = [];
 
@@ -68,10 +70,14 @@ final class EndpointData
 
     public function operationId(): string
     {
+        $versionPrefix = $this->groupVersion !== null
+            ? Str::studly($this->groupVersion).'_'
+            : '';
+
         if ($this->controller && $this->method) {
-            return Str::camel(class_basename($this->controller).'_'.$this->method);
+            return Str::camel($versionPrefix.class_basename($this->controller).'_'.$this->method);
         }
 
-        return Str::camel(implode('_', $this->verbs()).'_'.str_replace(['/', '{', '}'], '_', $this->uri));
+        return Str::camel($versionPrefix.implode('_', $this->verbs()).'_'.str_replace(['/', '{', '}'], '_', $this->uri));
     }
 }

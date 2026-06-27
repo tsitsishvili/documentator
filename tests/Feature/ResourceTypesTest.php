@@ -119,8 +119,8 @@ it('marks whenLoaded fields nullable and follows the nested resource', function 
 
     $tagList = widgetSchema('/api/widgets/{widget}')['properties']['tag_list'];
 
-    expect($tagList['nullable'])->toBeTrue()
-        ->and($tagList['type'])->toBe('array')
+    expect($tagList)->not->toHaveKey('nullable')
+        ->and($tagList['type'])->toBe(['array', 'null'])
         ->and($tagList['items']['properties']['label']['type'])->toBe('string');
 });
 

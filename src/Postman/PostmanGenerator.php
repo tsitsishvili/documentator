@@ -25,6 +25,8 @@ final class PostmanGenerator
         $info = $openapi['info'] ?? [];
         $servers = $openapi['servers'] ?? [];
         $baseUrl = $servers[0]['url'] ?? 'http://localhost';
+        $rootSecurity = $openapi['security'] ?? [];
+        $securitySchemes = $openapi['components']['securitySchemes'] ?? [];
 
         $folders = [];
         foreach ($openapi['paths'] ?? [] as $path => $operations) {
@@ -33,7 +35,9 @@ final class PostmanGenerator
                     continue;
                 }
                 $tag = $operation['tags'][0] ?? 'Endpoints';
-                $folders[$tag][] = $this->request($path, $verb, $operation);
+                $version = $operation['x-documentator-group-version'] ?? null;
+                $folder = $version === null ? $tag : "{$tag} {$version}";
+                $folders[$folder][] = $this->request($path, $verb, $operation, $rootSecurity, $securitySchemes);
             }
         }
 
@@ -58,9 +62,11 @@ final class PostmanGenerator
 
     /**
      * @param  array<string, mixed>  $operation
+     * @param  array<int, array<string, mixed>>  $rootSecurity
+     * @param  array<string, array<string, mixed>>  $securitySchemes
      * @return array<string, mixed>
      */
-    private function request(string $path, string $verb, array $operation): array
+    private function request(string $path, string $verb, array $operation, array $rootSecurity, array $securitySchemes): array
     {
         $parameters = $operation['parameters'] ?? [];
 
@@ -108,8 +114,10 @@ final class PostmanGenerator
             ], fn ($value) => $value !== null),
         ];
 
-        if (isset($operation['security'])) {
-            $request['auth'] = ['type' => 'bearer', 'bearer' => [['key' => 'token', 'value' => '{{token}}', 'type' => 'string']]];
+        $auth = $this->auth($operation, $rootSecurity, $securitySchemes);
+
+        if ($auth !== null) {
+            $request['auth'] = $auth;
         }
         if ($body !== null) {
             $request['body'] = $body;
@@ -119,6 +127,74 @@ final class PostmanGenerator
             'name' => $operation['summary'] ?? (strtoupper($verb).' '.$path),
             'request' => $request,
             'response' => [],
+        ];
+    }
+
+    /**
+     * @param  array<string, mixed>  $operation
+     * @param  array<int, array<string, mixed>>  $rootSecurity
+     * @param  array<string, array<string, mixed>>  $securitySchemes
+     * @return array<string, mixed>|null
+     */
+    private function auth(array $operation, array $rootSecurity, array $securitySchemes): ?array
+    {
+        $requirements = array_key_exists('security', $operation)
+            ? $operation['security']
+            : $rootSecurity;
+
+        if (! is_array($requirements) || $requirements === []) {
+            return null;
+        }
+
+        foreach ($requirements as $requirement) {
+            if (! is_array($requirement) || $requirement === []) {
+                continue;
+            }
+
+            $name = array_key_first($requirement);
+
+            if (! is_string($name)) {
+                continue;
+            }
+
+            $scheme = $securitySchemes[$name] ?? [];
+
+            return $this->authForScheme($scheme);
+        }
+
+        return null;
+    }
+
+    /**
+     * @param  array<string, mixed>  $scheme
+     * @return array<string, mixed>
+     */
+    private function authForScheme(array $scheme): array
+    {
+        if (($scheme['type'] ?? null) === 'apiKey') {
+            return [
+                'type' => 'apikey',
+                'apikey' => [
+                    ['key' => 'key', 'value' => (string) ($scheme['name'] ?? 'X-API-Key'), 'type' => 'string'],
+                    ['key' => 'value', 'value' => '{{token}}', 'type' => 'string'],
+                    ['key' => 'in', 'value' => (string) ($scheme['in'] ?? 'header'), 'type' => 'string'],
+                ],
+            ];
+        }
+
+        if (($scheme['type'] ?? null) === 'http' && ($scheme['scheme'] ?? null) === 'basic') {
+            return [
+                'type' => 'basic',
+                'basic' => [
+                    ['key' => 'username', 'value' => '{{username}}', 'type' => 'string'],
+                    ['key' => 'password', 'value' => '{{password}}', 'type' => 'string'],
+                ],
+            ];
+        }
+
+        return [
+            'type' => 'bearer',
+            'bearer' => [['key' => 'token', 'value' => '{{token}}', 'type' => 'string']],
         ];
     }
 }

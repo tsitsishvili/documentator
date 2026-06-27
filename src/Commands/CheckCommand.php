@@ -9,6 +9,7 @@ use Illuminate\Support\Facades\File;
 use Tsitsishvili\Documentator\Data\EndpointData;
 use Tsitsishvili\Documentator\Documentator;
 use Tsitsishvili\Documentator\Support\OpenApiDiff;
+use Tsitsishvili\Documentator\Support\OpenApiValidator;
 
 /**
  * Audits the inferred documentation so CI can catch gaps and drift: endpoints
@@ -39,9 +40,22 @@ final class CheckCommand extends Command
             $this->warn(count($issues).' documentation issue(s) found.');
         }
 
+        $validationErrors = OpenApiValidator::validate($documentator->toOpenApi());
+
+        foreach ($validationErrors as $error) {
+            $this->error("  {$error}");
+        }
+
+        if ($validationErrors === []) {
+            $this->info('OpenAPI document is valid.');
+        } else {
+            $this->newLine();
+            $this->error(count($validationErrors).' OpenAPI validation error(s) found.');
+        }
+
         $drifted = $this->checkDrift($documentator);
 
-        if ($drifted || ($issues !== [] && $this->option('strict'))) {
+        if ($validationErrors !== [] || $drifted || ($issues !== [] && $this->option('strict'))) {
             return self::FAILURE;
         }
 

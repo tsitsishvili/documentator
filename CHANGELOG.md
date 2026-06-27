@@ -7,6 +7,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-06-27
+
+### Added
+
+- **Inline `$request->validate([...])` inference.** A new
+  `ExtractInlineValidationRules` strategy parses literal validation arrays in the
+  controller body and documents them as parameters (query for GET/HEAD, body
+  otherwise) — so endpoints that validate inline instead of via a FormRequest are
+  no longer blank. Dynamic rule variables are skipped; attributes still override.
+- **Inline JSON response inference.** `ExtractInlineResponses` reads literal
+  `return response()->json([...], 202)` returns and documents the resulting status
+  and body shape, complementing the Resource/model return-type inference.
+- **OpenAPI document validation in `documentator:check`.** A new `OpenApiValidator`
+  runs lightweight 3.1 sanity checks (broken `$ref`s, malformed path / operation /
+  schema shapes) against the emitted document; any error fails the command
+  regardless of `--strict`.
+- **API versioning via `#[Group(version: 'v2')]`.** Keep one public group name
+  across versions: the version is emitted as `x-documentator-group-version`
+  (and `x-documentator-version` on the tag), shown as a group badge in the
+  built-in UI, prefixes generated operation IDs to avoid collisions, and splits
+  Postman folders per version.
+- **Configurable explorer auth storage.** `ui.auth_storage`
+  (`DOCUMENTATOR_AUTH_STORAGE`) selects where the try-it console persists the auth
+  token — `local` (default), `session`, or `memory` (never persisted).
+
+### Changed
+
+- **Scheme-aware Postman auth.** The Postman export now emits `apikey`, `basic`,
+  or `bearer` auth matching the operation's security scheme (and honours
+  root-level `security`), instead of always emitting bearer.
+- **Native OpenAPI 3.1 nullability.** The generator rewrites the internal
+  `nullable: true` flag to JSON Schema's `type: [..., "null"]` form throughout
+  nested `properties` / `items` / `oneOf` / `anyOf` / `allOf`, so the public
+  document uses the 3.1-native representation.
+
 ## [1.3.0] - 2026-06-26
 
 ### Added
@@ -152,7 +187,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (with a Scalar driver), Postman export, and the `documentator:generate`,
   `documentator:export` and `documentator:postman` commands.
 
-[Unreleased]: https://github.com/tsitsishvili/documentator/compare/v1.2.0...HEAD
+[Unreleased]: https://github.com/tsitsishvili/documentator/compare/v1.4.0...HEAD
+[1.4.0]: https://github.com/tsitsishvili/documentator/compare/v1.3.0...v1.4.0
+[1.3.0]: https://github.com/tsitsishvili/documentator/compare/v1.2.0...v1.3.0
 [1.2.0]: https://github.com/tsitsishvili/documentator/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/tsitsishvili/documentator/compare/v1.0.0...v1.1.0
 [1.0.0]: https://github.com/tsitsishvili/documentator/releases/tag/v1.0.0

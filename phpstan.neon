@@ -1,0 +1,13 @@
+includes:
+    - vendor/larastan/larastan/extension.neon
+
+parameters:
+    level: 5
+    paths:
+        - src
+        - config
+    tmpDir: .phpstan/cache
+    noEnvCallsOutsideOfConfig: false
+    treatPhpDocTypesAsCertain: false
+    viewDirectories:
+        - resources/views

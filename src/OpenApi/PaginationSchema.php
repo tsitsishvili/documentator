@@ -124,17 +124,15 @@ final class PaginationSchema
             return $schema;
         }
 
-        $hasHook = method_exists($collection, 'paginationInformation')
-            || (method_exists($collection, 'hasMacro') && $collection::hasMacro('paginationInformation'));
-
-        if (! $hasHook) {
-            return $schema;
-        }
-
         try {
             /** @var ResourceCollection $resource */
             $resource = new $collection(self::samplePaginator());
-            $information = $resource->paginationInformation(
+
+            if (! is_callable([$resource, 'paginationInformation'])) {
+                return $schema;
+            }
+
+            $information = $resource->{'paginationInformation'}(
                 Request::create('/'),
                 self::samplePaginated(),
                 self::defaultPaginationInformation(),

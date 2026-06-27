@@ -30,6 +30,35 @@
         });
     }
 
+    function resolvePointer(ref) {
+        if (!ref || ref.indexOf('#/') !== 0 || !state.spec) return null;
+
+        return ref.slice(2).split('/').reduce(function (node, part) {
+            if (node == null) return null;
+            var key = part.replace(/~1/g, '/').replace(/~0/g, '~');
+            return node[key];
+        }, state.spec);
+    }
+
+    function resolveSchema(schema, seen) {
+        if (!schema || typeof schema !== 'object' || !schema.$ref) return schema;
+
+        seen = seen || [];
+        if (seen.indexOf(schema.$ref) !== -1) return schema;
+
+        var target = resolvePointer(schema.$ref);
+        if (!target) return schema;
+
+        var resolved = resolveSchema(target, seen.concat(schema.$ref));
+        var merged = {};
+        Object.keys(resolved || {}).forEach(function (key) { merged[key] = resolved[key]; });
+        Object.keys(schema).forEach(function (key) {
+            if (key !== '$ref') merged[key] = schema[key];
+        });
+
+        return merged;
+    }
+
     function el(html) {
         var t = document.createElement('template');
         t.innerHTML = html.trim();
@@ -43,6 +72,7 @@
 
     /* The non-null members of an OpenAPI 3.1 type (which may be a union array). */
     function typesOf(schema) {
+        schema = resolveSchema(schema);
         if (!schema) return [];
         var t = schema.type;
         if (Array.isArray(t)) return t.filter(function (x) { return x !== 'null'; });
@@ -50,6 +80,7 @@
     }
 
     function isNullable(schema) {
+        schema = resolveSchema(schema);
         if (!schema) return false;
         if (schema.nullable) return true;
         return Array.isArray(schema.type) && schema.type.indexOf('null') !== -1;
@@ -57,6 +88,7 @@
 
     /* A human label covering every shape OpenAPI can describe. */
     function schemaType(schema) {
+        schema = resolveSchema(schema);
         if (!schema) return 'any';
         if (schema.oneOf || schema.anyOf) {
             return (schema.oneOf || schema.anyOf).map(schemaType).join(' | ') || 'any';
@@ -77,9 +109,17 @@
     }
 
     function isFileSchema(schema) {
+        schema = resolveSchema(schema);
         if (!schema) return false;
         if (schema.format === 'binary') return true;
-        return schema.type === 'array' && schema.items && schema.items.format === 'binary';
+        var items = resolveSchema(schema.items);
+        return typesOf(schema)[0] === 'array' && items && items.format === 'binary';
+    }
+
+    function arrayItemIsObject(schema) {
+        schema = resolveSchema(schema);
+
+        return !!(schema && (schema.properties || schema.type === 'object'));
     }
 
     /* The request body media type + schema we should drive the console from. */
@@ -91,7 +131,7 @@
             : c['application/json'] ? 'application/json'
             : Object.keys(c)[0];
         if (!mediaType) return null;
-        return { mediaType: mediaType, schema: c[mediaType].schema, required: !!rb.required };
+        return { mediaType: mediaType, schema: resolveSchema(c[mediaType].schema), required: !!rb.required };
     }
 
     function responseMedia(response) {
@@ -102,7 +142,7 @@
 
     function responseSchema(response) {
         var media = responseMedia(response);
-        return media && media.schema ? media.schema : null;
+        return media && media.schema ? resolveSchema(media.schema) : null;
     }
 
     /* A concrete example for a response, from `example`, the first of `examples`,
@@ -115,7 +155,8 @@
             var first = media.examples[Object.keys(media.examples)[0]];
             if (first && first.value !== undefined) return first.value;
         }
-        if (media.schema && media.schema.example !== undefined) return media.schema.example;
+        var schema = resolveSchema(media.schema);
+        if (schema && schema.example !== undefined) return schema.example;
         return undefined;
     }
 
@@ -124,6 +165,26 @@
         k: function (name) { return 'documentator:' + location.pathname + ':' + name; },
         get: function (name) { try { return localStorage.getItem(this.k(name)); } catch (e) { return null; } },
         set: function (name, value) { try { localStorage.setItem(this.k(name), value); } catch (e) { /* ignore */ } },
+    };
+    var authMemory = {};
+    var authStore = {
+        backend: function () {
+            if (cfg.authStorage === 'session') return sessionStorage;
+            if (cfg.authStorage === 'memory') return null;
+            return localStorage;
+        },
+        k: function (name) { return 'documentator:' + location.pathname + ':' + name; },
+        get: function (name) {
+            if (cfg.authStorage === 'memory') return authMemory[name] || '';
+            try { return this.backend().getItem(this.k(name)); } catch (e) { return ''; }
+        },
+        set: function (name, value) {
+            if (cfg.authStorage === 'memory') { authMemory[name] = value || ''; return; }
+            try {
+                if (value) this.backend().setItem(this.k(name), value);
+                else this.backend().removeItem(this.k(name));
+            } catch (e) { /* ignore */ }
+        },
     };
 
     function slugFor(entry) {
@@ -207,6 +268,7 @@
     /* Build a sample JSON value from a schema (for the request body skeleton). */
     function sample(schema, depth) {
         depth = depth || 0;
+        schema = resolveSchema(schema);
         if (!schema || depth > 6) return null;
         if (schema.example !== undefined) return schema.example;
         if (schema.enum && schema.enum.length) return schema.enum[0];
@@ -255,6 +317,7 @@
                     path: path,
                     op: op,
                     tag: (op.tags && op.tags[0]) || 'Endpoints',
+                    tagVersion: op['x-documentator-group-version'] || '',
                 });
             });
         });
@@ -269,13 +332,18 @@
     function groupsFor(filter) {
         var q = (filter || '').trim().toLowerCase();
         var order = [];
-        var byTag = {};
+        var byGroup = {};
         state.operations.forEach(function (entry) {
-            if (q && (entry.method + ' ' + entry.path + ' ' + (entry.op.summary || '')).toLowerCase().indexOf(q) === -1) return;
-            if (!byTag[entry.tag]) { byTag[entry.tag] = []; order.push(entry.tag); }
-            byTag[entry.tag].push(entry);
+            var searchable = entry.method + ' ' + entry.path + ' ' + (entry.op.summary || '') + ' ' + entry.tag + ' ' + entry.tagVersion;
+            if (q && searchable.toLowerCase().indexOf(q) === -1) return;
+            var key = entry.tag + '\u0000' + entry.tagVersion;
+            if (!byGroup[key]) {
+                byGroup[key] = { tag: entry.tag, version: entry.tagVersion, items: [] };
+                order.push(key);
+            }
+            byGroup[key].items.push(entry);
         });
-        return order.map(function (tag) { return { tag: tag, items: byTag[tag] }; });
+        return order.map(function (key) { return byGroup[key]; });
     }
 
     /* ---------- security ---------- */
@@ -295,8 +363,8 @@
     }
 
     /* Tokens are stored per scheme; fall back to the legacy single-token key. */
-    function authToken(key) { return store.get('auth:' + key) || store.get('auth') || ''; }
-    function setAuthToken(key, value) { store.set('auth:' + key, value || ''); }
+    function authToken(key) { return authStore.get('auth:' + key) || authStore.get('auth') || ''; }
+    function setAuthToken(key, value) { authStore.set('auth:' + key, value || ''); }
     function anyAuthorized() {
         return Object.keys(securitySchemes()).some(function (k) { return !!authToken(k); });
     }
@@ -418,6 +486,7 @@
         var form = document.getElementById('consoleForm');
         form.addEventListener('input', onFormInput);
         form.addEventListener('change', updateSnippet); // selects + file pickers
+        form.addEventListener('click', onConsoleFormClick);
         wireConsoleResize();
 
         var authBtn = document.getElementById('authBtn');
@@ -630,7 +699,8 @@
                     '<span class="nav-item__main"><span class="nav-item__path">' + esc(entry.path) + '</span>' +
                     summaryHtml + '</span></button></li>';
             }).join('');
-            return '<div class="nav-group"><h2 class="nav-group__title"><span>' + esc(group.tag) + '</span>' +
+            var version = group.version ? '<span class="nav-group__version">' + esc(group.version) + '</span>' : '';
+            return '<div class="nav-group"><h2 class="nav-group__title"><span class="nav-group__label"><span>' + esc(group.tag) + '</span>' + version + '</span>' +
                 '<span class="nav-group__count">' + group.items.length + '</span></h2><ul class="nav-list">' + items + '</ul></div>';
         }).join('');
     }
@@ -674,16 +744,18 @@
 
     /* A field table for any object/array schema; recurses into nested shapes. */
     function rowsFromSchema(schema) {
+        schema = resolveSchema(schema);
         if (!schema) return '';
         if (schema.type === 'array' && schema.items) {
-            if (schema.items.properties) return rowsFromSchema(schema.items);
+            var items = resolveSchema(schema.items);
+            if (items && items.properties) return rowsFromSchema(items);
             return '<div class="row"><div class="row__name">items</div>' +
-                '<div class="row__type"><b>' + esc(schemaType(schema.items)) + '</b></div></div>';
+                '<div class="row__type"><b>' + esc(schemaType(items)) + '</b></div></div>';
         }
         if (!schema.properties) return '';
         var required = schema.required || [];
         return Object.keys(schema.properties).map(function (name) {
-            var prop = schema.properties[name] || {};
+            var prop = resolveSchema(schema.properties[name] || {});
             var req = required.indexOf(name) !== -1 ? '<span class="row__req">required</span>' : '';
 
             var meta = [];
@@ -696,8 +768,9 @@
                 ? '<div class="row__enum">' + prop.enum.map(function (v) { return '<code>' + esc(v) + '</code>'; }).join(' ') + '</div>'
                 : '';
 
+            var propItems = prop.items ? resolveSchema(prop.items) : null;
             var children = (prop.type === 'object' && prop.properties) ? rowsFromSchema(prop)
-                : (prop.type === 'array' && prop.items && prop.items.properties) ? rowsFromSchema(prop.items) : '';
+                : (prop.type === 'array' && propItems && propItems.properties) ? rowsFromSchema(propItems) : '';
             var childWrap = children ? '<div class="row--nested">' + children + '</div>' : '';
 
             return '<div class="row"><div class="row__name">' + esc(name) + req + '</div>' +
@@ -736,6 +809,7 @@
         html += '<h1 class="endpoint__summary">' + esc(op.summary || entry.path) + '</h1>';
         html += '<div class="endpoint__meta">' +
             '<span>' + esc(entry.tag) + '</span>' +
+            (entry.tagVersion ? '<span>' + esc(entry.tagVersion) + '</span>' : '') +
             (op.operationId ? '<span>' + esc(op.operationId) + '</span>' : '') +
             '<span>' + esc(entry.method.toUpperCase()) + '</span>' +
             '</div>';
@@ -817,8 +891,91 @@
         return '<div class="field"><label class="field__label">' + esc(label) + req + note + '</label>' + controlHtml + '</div>';
     }
 
+    function queryArrayName(name) {
+        return /\[\]$/.test(name) ? name : name + '[]';
+    }
+
+    function queryInputType(schema) {
+        var type = typesOf(resolveSchema(schema))[0];
+
+        return type === 'integer' || type === 'number' ? 'number' : 'text';
+    }
+
+    function repeatValueRow(kind, name, ftype, placeholder, removable) {
+        return '<div class="repeat__row">' +
+            '<input class="input" type="' + esc(ftype) + '" data-kind="' + esc(kind) + '" data-array="true" data-name="' + esc(name) +
+                '" data-ftype="' + esc(ftype) + '" placeholder="' + esc(placeholder) + '">' +
+            '<button type="button" class="repeat__remove" data-repeat-remove aria-label="Remove ' + esc(name) + ' value" title="Remove"' +
+                (removable ? '' : ' disabled') + '>×</button>' +
+        '</div>';
+    }
+
+    function updateRepeatButtons(group) {
+        var rows = group.querySelectorAll('.repeat__row');
+        rows.forEach(function (row) {
+            var remove = row.querySelector('[data-repeat-remove]');
+            if (remove) remove.disabled = rows.length === 1;
+        });
+    }
+
+    function onConsoleFormClick(e) {
+        var add = e.target.closest('[data-repeat-add]');
+        var remove = e.target.closest('[data-repeat-remove]');
+
+        if (add) {
+            var group = add.closest('[data-repeat]');
+            var items = group ? group.querySelector('.repeat__items') : null;
+            if (!group || !items) return;
+
+            items.insertAdjacentHTML('beforeend', repeatValueRow(
+                group.dataset.repeatKind || 'query',
+                group.dataset.name,
+                group.dataset.ftype || 'text',
+                group.dataset.placeholder || 'value',
+                true
+            ));
+            updateRepeatButtons(group);
+            var last = items.querySelector('.repeat__row:last-child [data-array="true"]');
+            if (last) last.focus();
+            updateSnippet();
+            return;
+        }
+
+        if (remove) {
+            var row = remove.closest('.repeat__row');
+            var group = remove.closest('[data-repeat]');
+            if (!row || !group || group.querySelectorAll('.repeat__row').length === 1) return;
+
+            row.remove();
+            updateRepeatButtons(group);
+            updateSnippet();
+        }
+    }
+
+    function queryFieldControl(param) {
+        var schema = resolveSchema(param.schema) || {};
+        var typeLbl = schemaType(schema);
+
+        if (typesOf(schema)[0] === 'array') {
+            var itemSchema = resolveSchema(schema.items) || {};
+            var itemType = schema.items ? schemaType(itemSchema) : 'string';
+            var ftype = queryInputType(itemSchema);
+            var control = '<div class="repeat" data-repeat data-repeat-kind="query" data-name="' + esc(param.name) +
+                '" data-ftype="' + esc(ftype) + '" data-placeholder="' + esc(itemType) + '">' +
+                    '<div class="repeat__items">' + repeatValueRow('query', param.name, ftype, itemType, false) + '</div>' +
+                    '<button type="button" class="repeat__add" data-repeat-add aria-label="Add ' + esc(param.name) + ' value" title="Add">+</button>' +
+                '</div>';
+
+            return field(param.name, control, param.required, typeLbl);
+        }
+
+        return field(param.name, '<input class="input" type="text" data-kind="query" data-name="' + esc(param.name) +
+            '" data-ftype="text" placeholder="' + esc(typeLbl) + '">', param.required);
+    }
+
     /* The right control for one top-level body property, driven by its schema. */
     function bodyFieldControl(name, schema, required) {
+        schema = resolveSchema(schema) || {};
         var attrs = 'data-kind="body-field" data-name="' + esc(name) + '"';
         var typeLbl = schemaType(schema);
         var control;
@@ -836,11 +993,18 @@
                 '<option value="">—</option><option value="true">true</option><option value="false">false</option></select>';
         } else if (typesOf(schema)[0] === 'integer' || typesOf(schema)[0] === 'number') {
             control = '<input class="input" type="number" ' + attrs + ' data-ftype="number" placeholder="' + esc(typeLbl) + '">';
-        } else if (typesOf(schema)[0] === 'object' || (schema.type === 'array' && schema.items && (schema.items.properties || schema.items.type === 'object'))) {
+        } else if (typesOf(schema)[0] === 'object' || (typesOf(schema)[0] === 'array' && schema.items && arrayItemIsObject(schema.items))) {
             var skeleton = JSON.stringify(sample(schema), null, 2);
             control = '<textarea class="textarea textarea--sm" ' + attrs + ' data-ftype="json" spellcheck="false">' + esc(skeleton) + '</textarea>';
-        } else if (schema.type === 'array') {
-            control = '<input class="input" ' + attrs + ' data-ftype="csv" placeholder="comma, separated, values">';
+        } else if (typesOf(schema)[0] === 'array') {
+            var itemSchema = resolveSchema(schema.items) || {};
+            var itemType = schema.items ? schemaType(itemSchema) : 'string';
+            var ftype = queryInputType(itemSchema);
+            control = '<div class="repeat" data-repeat data-repeat-kind="body-field" data-name="' + esc(name) +
+                '" data-ftype="' + esc(ftype) + '" data-placeholder="' + esc(itemType) + '">' +
+                    '<div class="repeat__items">' + repeatValueRow('body-field', name, ftype, itemType, false) + '</div>' +
+                    '<button type="button" class="repeat__add" data-repeat-add aria-label="Add ' + esc(name) + ' value" title="Add">+</button>' +
+                '</div>';
         } else {
             control = '<input class="input" type="text" ' + attrs + ' data-ftype="text" placeholder="' + esc(typeLbl) + '">';
         }
@@ -860,6 +1024,13 @@
             } else {
                 control.value = '';
             }
+        });
+        form.querySelectorAll('[data-repeat]').forEach(function (group) {
+            var rows = group.querySelectorAll('.repeat__row');
+            rows.forEach(function (row, index) {
+                if (index > 0) row.remove();
+            });
+            updateRepeatButtons(group);
         });
 
         document.getElementById('responseMount').innerHTML = '';
@@ -900,10 +1071,7 @@
         var queryParams = (op.parameters || []).filter(function (p) { return p.in === 'query'; });
         if (queryParams.length) {
             html += '<div class="subhead">Query</div>';
-            html += queryParams.map(function (p) {
-                return field(p.name, '<input class="input" type="text" data-kind="query" data-name="' + esc(p.name) + '" placeholder="' +
-                    esc(schemaType(p.schema)) + '">', p.required);
-            }).join('');
+            html += queryParams.map(queryFieldControl).join('');
         }
 
         var content = requestBodyContent(op);
@@ -988,9 +1156,17 @@
             }
             if (input.value === '') return;
             var val = coerce(input.dataset.ftype, input.value);
-            json[name] = val;
+            if (input.dataset.array === 'true') {
+                json[name] ??= [];
+                json[name].push(val);
+            } else {
+                json[name] = val;
+            }
             hasJson = true;
-            fields.push({ name: name, value: typeof val === 'string' ? val : JSON.stringify(val) });
+            fields.push({
+                name: input.dataset.array === 'true' ? queryArrayName(name) : name,
+                value: typeof val === 'string' ? val : JSON.stringify(val),
+            });
         });
 
         if (multipart) return { mode: 'multipart', fields: fields, files: files };
@@ -1011,7 +1187,13 @@
 
         var query = [];
         form.querySelectorAll('[data-kind="query"]').forEach(function (input) {
-            if (input.value !== '') query.push(encodeURIComponent(input.dataset.name) + '=' + encodeURIComponent(input.value));
+            if (input.value === '') return;
+            if (input.dataset.array === 'true') {
+                var name = queryArrayName(input.dataset.name);
+                query.push(encodeURIComponent(name) + '=' + encodeURIComponent(coerce(input.dataset.ftype, input.value)));
+                return;
+            }
+            query.push(encodeURIComponent(input.dataset.name) + '=' + encodeURIComponent(input.value));
         });
 
         var headers = { Accept: 'application/json' };
@@ -1395,6 +1577,7 @@
        what `| null` is for), so their fields stay required. Requests honour the
        `required` list, where omission is meaningful. */
     function tsObject(schema, depth, requireAll) {
+        schema = resolveSchema(schema) || {};
         var props = schema.properties || {};
         var keys = Object.keys(props);
         if (!keys.length) return 'Record<string, unknown>';
@@ -1409,6 +1592,7 @@
     /* An OpenAPI schema as a TypeScript type literal (2 spaces per level). */
     function tsType(schema, depth, requireAll) {
         depth = depth || 0;
+        schema = resolveSchema(schema);
         if (!schema) return 'unknown';
         var nul = isNullable(schema) ? ' | null' : '';
         if (schema.oneOf || schema.anyOf) {
@@ -1438,6 +1622,7 @@
     /* Does the schema carry a date/date-time anywhere? Drives whether the fetch
        wrapper needs the date-reviving JSON parse. */
     function schemaHasDate(schema, seen) {
+        schema = resolveSchema(schema);
         if (!schema || typeof schema !== 'object') return false;
         if (schema.format === 'date' || schema.format === 'date-time') return true;
         seen = seen || [];
@@ -1460,6 +1645,7 @@
     }
 
     function isDateField(schema) {
+        schema = resolveSchema(schema);
         return typesOf(schema)[0] === 'string' && (schema.format === 'date' || schema.format === 'date-time');
     }
 
@@ -1470,6 +1656,7 @@
 
     /* `{ ...src, <date overrides> }` — only the date-bearing props are rewritten. */
     function spreadLiteral(schema, src, pad, paren, depth) {
+        schema = resolveSchema(schema) || {};
         var inner = pad + '  ';
         var props = schema.properties || {};
         var parts = ['...' + src + ','];
@@ -1482,10 +1669,11 @@
     /* An expression that yields `acc` with its dates converted. Assumes the
        subtree actually contains a date (callers gate on `schemaHasDate`). */
     function convertExpr(schema, acc, pad, depth) {
+        schema = resolveSchema(schema) || {};
         if (isDateField(schema)) return dateFieldExpr(schema, acc);
         var t = typesOf(schema)[0];
         if (t === 'array' && schema.items && schemaHasDate(schema.items)) {
-            var item = schema.items;
+            var item = resolveSchema(schema.items) || {};
             var v = depth ? 'item' + depth : 'item';
             if (typesOf(item)[0] === 'object' || item.properties) {
                 return acc + '.map((' + v + ': any) => ' + spreadLiteral(item, v, pad, true, depth + 1) + ')';
@@ -1498,6 +1686,7 @@
 
     /* The wrapper lines that parse the body and hydrate its dates in place. */
     function hydrationLines(schema, resType) {
+        schema = resolveSchema(schema) || {};
         if (typesOf(schema)[0] === 'array' && schema.items && schemaHasDate(schema.items)) {
             return ['  const data = (await response.json()) as ' + resType + ';',
                 '  return ' + convertExpr(schema, 'data', '  ', 0) + ';'];
@@ -1513,6 +1702,7 @@
 
     /* A named declaration: `interface` for plain objects, `type` for everything else. */
     function tsDeclaration(name, schema, requireAll) {
+        schema = resolveSchema(schema) || {};
         var t = typesOf(schema)[0];
         if ((t === 'object' || schema.properties) && !isNullable(schema) && !schema.oneOf && !schema.anyOf) {
             return 'interface ' + name + ' ' + tsObject(schema, 0, requireAll);

@@ -11,14 +11,11 @@ use PhpParser\Node;
 use PhpParser\Node\Expr\Cast;
 use PhpParser\Node\Scalar;
 use PhpParser\NodeFinder;
-use PhpParser\NodeTraverser;
-use PhpParser\NodeVisitor\NameResolver;
-use PhpParser\Parser;
-use PhpParser\ParserFactory;
 use ReflectionClass;
 use ReflectionMethod;
 use Throwable;
 use Tsitsishvili\Documentator\Attributes\UsesModel;
+use Tsitsishvili\Documentator\Extraction\Support\SourceAnalyzer;
 
 /**
  * Recovers an OpenAPI object schema from an API Resource by statically parsing
@@ -48,21 +45,13 @@ final class ResourceSchemaExtractor
         'mergewhen',
     ];
 
-    private readonly Parser $parser;
-
-    /** @var array<string, array<int, Node>|null> parsed+name-resolved AST per file */
-    private array $cache = [];
-
     /** @var array<string, string> casts of the model wrapped by the resource currently being parsed */
     private array $currentCasts = [];
 
     /** @var array<string, array<string, mixed>> @property doc types of that model */
     private array $currentDocProps = [];
 
-    public function __construct()
-    {
-        $this->parser = (new ParserFactory)->createForHostVersion();
-    }
+    public function __construct(private readonly SourceAnalyzer $source) {}
 
     /**
      * @return array<string, mixed> OpenAPI schema (always at least an object)
@@ -73,29 +62,13 @@ final class ResourceSchemaExtractor
             return self::OBJECT;
         }
 
-        try {
-            $method = new ReflectionMethod($resourceClass, 'toArray');
-        } catch (Throwable) {
-            return self::OBJECT;
-        }
+        $method = new ReflectionMethod($resourceClass, 'toArray');
 
         if (in_array($method->getDeclaringClass()->getName(), [JsonResource::class, ResourceCollection::class], true)) {
             return self::OBJECT;
         }
 
-        $file = $method->getFileName();
-        $ast = $file ? $this->parseFile($file) : null;
-
-        if ($ast === null) {
-            return self::OBJECT;
-        }
-
-        $methodNode = (new NodeFinder)->findFirst(
-            $ast,
-            fn (Node $node) => $node instanceof Node\Stmt\ClassMethod
-                && $node->name->toString() === 'toArray'
-                && $node->getStartLine() === $method->getStartLine(),
-        );
+        $methodNode = $this->source->methodNode($method);
 
         $return = $methodNode === null ? null : (new NodeFinder)->findFirst(
             $methodNode,
@@ -167,9 +140,11 @@ final class ResourceSchemaExtractor
             $name = $item->key->value;
             $value = $item->value;
 
-            $schema = $this->isConditional($value)
-                ? ($this->conditionalNested($value, $depth) ?? $this->inferType($value, $depth) ?? $this->fallback($name))
-                : ($this->inferType($value, $depth) ?? $this->fallback($name));
+            if ($this->isConditional($value) && $value instanceof Node\Expr\MethodCall) {
+                $schema = $this->conditionalNested($value, $depth) ?? $this->inferType($value, $depth) ?? $this->fallback($name);
+            } else {
+                $schema = $this->inferType($value, $depth) ?? $this->fallback($name);
+            }
 
             // A whenLoaded()/when() anywhere in the value means the field is optional.
             if ($this->hasConditional($value)) {
@@ -265,7 +240,23 @@ final class ResourceSchemaExtractor
             return $properties === [] ? self::OBJECT : ['type' => 'object', 'properties' => $properties];
         }
 
-        return ['type' => 'array', 'items' => self::OBJECT];
+        return ['type' => 'array', 'items' => $this->listItemSchema($array, $depth)];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function listItemSchema(Node\Expr\Array_ $array, int $depth): array
+    {
+        foreach ($array->items as $item) {
+            if (! $item instanceof Node\ArrayItem) {
+                continue;
+            }
+
+            return $this->inferType($item->value, $depth) ?? self::OBJECT;
+        }
+
+        return self::OBJECT;
     }
 
     /**
@@ -513,29 +504,5 @@ final class ResourceSchemaExtractor
         $candidate = $namespace.'\\'.$base;
 
         return class_exists($candidate) && is_subclass_of($candidate, Model::class) ? $candidate : null;
-    }
-
-    /**
-     * @return array<int, Node>|null
-     */
-    private function parseFile(string $file): ?array
-    {
-        if (array_key_exists($file, $this->cache)) {
-            return $this->cache[$file];
-        }
-
-        try {
-            $ast = $this->parser->parse((string) file_get_contents($file));
-
-            if ($ast === null) {
-                return $this->cache[$file] = null;
-            }
-
-            $ast = (new NodeTraverser(new NameResolver))->traverse($ast);
-
-            return $this->cache[$file] = $ast;
-        } catch (Throwable) {
-            return $this->cache[$file] = null;
-        }
     }
 }

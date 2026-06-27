@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Tsitsishvili\Documentator\Http\Controllers;
 
+use Illuminate\Contracts\View\Factory;
 use Illuminate\Contracts\View\View;
 
 /**
@@ -12,19 +13,22 @@ use Illuminate\Contracts\View\View;
  */
 final class DocsController
 {
+    public function __construct(private readonly Factory $views) {}
+
     public function index(): View
     {
         if (config('documentator.ui.driver') === 'scalar') {
-            return view('documentator::scalar', [
+            return $this->views->make('documentator::scalar', [
                 'title' => config('documentator.title'),
                 'specUrl' => route('documentator.openapi'),
                 'assets' => config('documentator.ui.assets'),
             ]);
         }
 
-        return view('documentator::docs', [
+        return $this->views->make('documentator::docs', [
             'title' => config('documentator.title'),
             'specUrl' => route('documentator.openapi'),
+            'authStorage' => config('documentator.ui.auth_storage', 'local'),
             'cssUrl' => $this->assetUrl('app.css'),
             'jsUrl' => $this->assetUrl('app.js'),
         ]);
