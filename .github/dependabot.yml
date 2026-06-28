@@ -1,0 +1,39 @@
+version: 2
+updates:
+  - package-ecosystem: composer
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: Asia/Tbilisi
+    open-pull-requests-limit: 5
+    groups:
+      laravel:
+        patterns:
+          - illuminate/*
+          - orchestra/testbench
+      quality:
+        patterns:
+          - laravel/pint
+          - larastan/larastan
+          - phpstan/phpstan
+          - pestphp/*
+
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: Asia/Tbilisi
+    open-pull-requests-limit: 5
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: Asia/Tbilisi
+    open-pull-requests-limit: 5
