@@ -15,7 +15,7 @@ jobs:
         dependencies: [prefer-lowest, prefer-stable]
     name: PHP ${{ matrix.php }} - ${{ matrix.dependencies }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
@@ -33,7 +33,7 @@ jobs:
     runs-on: ubuntu-latest
     name: Pint
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
@@ -51,10 +51,10 @@ jobs:
     runs-on: ubuntu-latest
     name: Browser UI
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: 22
           cache: npm
