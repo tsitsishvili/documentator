@@ -1,0 +1,10 @@
+{
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test:browser": "playwright test tests/Browser"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.54.0"
+  }
+}

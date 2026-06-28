@@ -1,6 +1,6 @@
 {
     "name": "tsitsishvili/documentator",
-    "description": "Auto-inferred, interactive API documentation for Laravel. Scans your routes, FormRequests, API Resources and return types, lets you override with PHP attributes, and serves an interactive Scalar UI backed by an OpenAPI 3.1 spec.",
+    "description": "Auto-inferred, interactive API documentation for Laravel. Scans routes, FormRequests, API Resources and return types, lets you override with PHP attributes, and serves a built-in explorer or Scalar UI backed by OpenAPI 3.1.",
     "keywords": ["laravel", "php", "api", "api-documentation", "documentation", "openapi", "openapi31", "swagger", "scalar", "postman", "php-attributes", "laravel-package", "rest-api"],
     "license": "MIT",
     "require": {

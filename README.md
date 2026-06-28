@@ -8,11 +8,13 @@ anything with PHP attributes, and serves an interactive UI — backed by a stand
 **OpenAPI 3.1** document — so third parties can browse your endpoints, read
 descriptions, and try requests live.
 
-- **Zero-config by default** — point it at `api/*` and you get docs.
-- **Attribute overrides** — enrich or correct any inferred detail.
-- **Built-in explorer** — a dark "Aurora" UI (no external assets) with a request
-  playground, auth, snippets, and a readable response viewer. Or switch to
-  [Scalar](https://scalar.com).
+- **Zero-config by default** — point it at `api/*` and you get useful docs.
+- **Inference first, overrides last** — FormRequests, inline validation, Data
+  objects, Resources, Eloquent models, return statements and PHPDoc do the heavy
+  lifting; PHP attributes refine or replace anything.
+- **Built-in explorer** — a dark "Aurora" UI with no external assets, route
+  sections, filters, a request playground, auth, snippets and a readable
+  response viewer. Or switch to [Scalar](https://scalar.com).
 - **Standard output** — a plain OpenAPI 3.1 document other tools can consume,
   with response schemas shared by multiple operations hoisted into
   `components/schemas`.
@@ -34,6 +36,8 @@ php artisan vendor:publish --tag=documentator-config
 ```
 
 Visit `/docs` to see the interactive UI. The raw spec is at `/docs/openapi.json`.
+When `grouping.sections` is configured, each section gets its own UI and split
+spec, such as `/docs/api` and `/docs/api/openapi.json`.
 
 ## How inference works
 
@@ -45,8 +49,9 @@ pipeline enriches the endpoint:
 | Route definition | verbs, URI, **typed path params** (numeric constraint / bound-model key → `integer`), name, auth guess from `auth` middleware |
 | Controller PHPDoc | **summary** (first line) and **description** (the rest), so written docblocks become docs |
 | FormRequest `rules()` | parameters with types, required, **enums** (`in:`, `Rule::enum`, `Rule::in`), **formats** (email/uuid/date), bounds (`min`/`max`), `regex`→`pattern`, `digits`→integer, `confirmed`→a `_confirmation` field, nullability, **nested** rules (`items.*.id`), **file uploads** → multipart. On GET/HEAD routes these become **query parameters** instead of a body |
+| Inline `$request->validate([...])` | the same rule parsing for literal inline validation arrays in controller methods |
 | spatie/laravel-data | request/response **Data objects** — typed properties, enums, nested Data, collections (optional, auto-detected) |
-| Controller return type | a success response schema from a Resource's `toArray()`, a `ResourceCollection`, or a `Resource::collection($q->paginate())` **return statement** (**paginator envelope** + `page`/`per_page` query params), or an **Eloquent model** (`$casts` + `@property`). Status follows the verb: POST → **201**, DELETE → **204** |
+| Controller return type / return statement | a success response schema from a Resource's `toArray()`, a `ResourceCollection`, a `Resource::collection($q->paginate())` **return statement** (**paginator envelope** + `page`/`per_page` query params), literal `response()->json([...], 202)` payloads, common Laravel response helpers (`response()`, `view()`, redirects), service methods that return arrays, or an **Eloquent model** (`$casts` + `@property`). Status follows the verb: POST → **201**, DELETE → **204** |
 | Generated examples | a representative `example` for every body/parameter — format- and name-aware (`email`→`user@example.com`, `*_url`, `*_name`, dates, enums, …) so the playground starts filled |
 | PHP attributes | overrides for everything above (runs last) |
 
@@ -134,7 +139,9 @@ automatically — and `auth:<guard>` picks the scheme whose key matches the guar
 name, falling back to `default`; use `#[Authenticated('scheme-key')]` to be
 explicit or pick a non-default scheme. Token-ability middleware
 (`abilities:` / `ability:` / `scopes:` / `scope:`) is surfaced as the operation's
-required scopes. The UI renders the matching authorize / token input.
+required scopes. Custom middleware aliases can be mapped with
+`documentator.auth_middleware`, for example `internal.auth` → `internal`.
+The UI renders the matching authorize / token input.
 
 To require auth across the whole API instead of marking each endpoint, set
 `documentator.authenticate` to `true` (or a scheme name) — it emits a top-level
@@ -160,6 +167,57 @@ collapsible tree with **Expand all** / **Collapse all**, while **Copy** still
 copies the full formatted response body. Shortcuts: `/` focuses search,
 `Cmd/Ctrl+Enter` sends, `Esc` closes panels.
 Cross-origin "try it" calls require the API to allow CORS from the docs origin.
+
+## Organizing larger APIs
+
+For applications with multiple route surfaces, configure sections:
+
+```php
+'routes' => [
+    'match' => ['api/*', 'app/*'],
+],
+
+'grouping' => [
+    'sections' => [
+        'api' => 'API',
+        'app' => 'App',
+    ],
+],
+```
+
+Documentator redirects `/docs` to the first section and serves split specs at
+`/docs/api/openapi.json`, `/docs/app/openapi.json`, and so on. Cached generation
+also writes section files next to the full cached spec.
+
+Within a section, groups can come from controllers, path segments, or explicit
+`#[Group]` attributes:
+
+```php
+'grouping' => [
+    'source' => 'auto', // auto, controller, path
+    'path_depth' => 1,
+    'ignore_path_prefixes' => ['api'],
+    'ignore_path_parameters' => true,
+],
+```
+
+Route-wide placeholders such as `{pathlang}` or `{tenant}` can be described once
+and reused everywhere:
+
+```php
+'global_path_parameters' => [
+    'pathlang' => [
+        'description' => 'Language code used by localized routes.',
+        'schema' => ['type' => 'string', 'enum' => ['ka', 'en']],
+        'example' => 'ka',
+        'grouping' => false,
+    ],
+],
+```
+
+Those parameters are marked in the OpenAPI document with
+`x-documentator-global`, and the metadata is also emitted at
+`x-documentator-global-path-parameters`.
 
 ## Production
 
@@ -189,12 +247,16 @@ php artisan documentator:postman collection.json    # export a Postman v2.1 coll
 `documentator:check` audits the generated docs — it flags closure routes (which
 can't be introspected) and endpoints with no documented success schema, and can
 detect drift from a committed spec, listing the specific path / operation /
-response changes:
+response changes. It also prints a documentation health summary (operation
+count, tags, secured operations, missing/generic summaries and generic success
+responses):
 
 ```bash
-php artisan documentator:check                       # report issues (exit 0)
-php artisan documentator:check --strict              # fail the build if any issue is found
-php artisan documentator:check --against=openapi.json # fail if the spec has drifted; re-export and commit
+php artisan documentator:check                         # report issues (exit 0)
+php artisan documentator:check --strict                # fail the build if any issue is found
+php artisan documentator:check --json                  # machine-readable CI/dashboard payload
+php artisan documentator:check --suggest-hidden        # suggest internal/debug routes to hide
+php artisan documentator:check --against=openapi.json  # fail if the spec has drifted; re-export and commit
 ```
 
 ## Configuration
@@ -202,16 +264,20 @@ php artisan documentator:check --against=openapi.json # fail if the spec has dri
 Key options in `config/documentator.php`:
 
 - `enabled` — docs access; `null` = open except in production, or force `true`/`false`. Restrict *who* may view with `Documentator::auth()`.
-- `routes.match` / `routes.exclude` — which routes are documented.
+- `routes.match` / `routes.exclude` / `routes.exclude_middleware` — which routes are documented.
 - `route.prefix` / `route.middleware` / `route.domain` — where the UI is served. Lock it down for private APIs.
 - `title` / `version` / `description` / `servers` — OpenAPI `info` and server list.
 - `security` — auth schemes.
+- `auth_middleware` — middleware aliases/patterns that imply auth schemes.
 - `authenticate` — require a scheme API-wide (`true` = the `default` scheme, or a scheme name); `false` = per-endpoint.
 - `error_responses` — infer conventional 401/403/404/422 responses from the endpoint shape (default `true`).
 - `infer_status_codes` — pick the success status from the verb (POST → 201, DELETE → 204) instead of always 200 (default `true`).
 - `generate_examples` — seed an example for every body/parameter that lacks one (default `true`).
 - `models_namespace` — where Resources' wrapped models live (for cast-based typing).
+- `grouping.*` — controller/path grouping and split section specs such as `/docs/api/openapi.json`.
+- `global_path_parameters` — reusable metadata for placeholders shared across many routes.
 - `ui.driver` — `documentator` (built-in explorer, default) or `scalar`.
+- `ui.auth_storage` — where the explorer keeps auth tokens: `local`, `session`, or `memory`.
 - `ui.assets` — Scalar bundle URL when `ui.driver = scalar` (pinned; self-host for SRI/CSP).
 - `cache` — pre-generated spec file.
 - `extensions.strategies` / `extensions.openapi_transformers` — register custom extraction strategies (resolved from the container, inserted just before attribute overrides) and transformers that receive the generated spec array and may return a modified one. See [CONTRIBUTING.md](CONTRIBUTING.md).
@@ -220,8 +286,9 @@ Key options in `config/documentator.php`:
 
 ```bash
 composer install
-composer test      # Pest + Orchestra Testbench
-composer lint      # Laravel Pint
+composer test          # Pest + Orchestra Testbench
+composer lint          # Laravel Pint
+npm run test:browser   # Playwright checks for the built-in UI
 ```
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the architecture tour, how to add an

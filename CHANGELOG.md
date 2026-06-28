@@ -7,6 +7,52 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.5.0] - 2026-06-28
+
+### Added
+
+- **Sectioned documentation surfaces.** Configure `grouping.sections` to split a
+  large app into stable docs surfaces such as `/docs/api` and `/docs/app`, each
+  with its own filtered OpenAPI document (`/{section}/openapi.json`). The root
+  `/docs` redirects to the first configured section, and `documentator:generate`
+  writes matching split cache files next to the full cached spec.
+- **Path-based grouping controls.** `grouping.source`, `path_depth`,
+  `ignore_path_prefixes` and `ignore_path_parameters` let controller-less routes
+  and localized/tenant routes group by meaningful path segments instead of
+  falling back to a generic "Endpoints" bucket.
+- **Global path parameter metadata.** `global_path_parameters` describes shared
+  placeholders like `{pathlang}` or `{tenant}` once, applies that metadata to
+  every matching operation parameter, emits `x-documentator-global` on each use,
+  and publishes the shared definitions under
+  `x-documentator-global-path-parameters`.
+- **Route exclusion by middleware.** `routes.exclude_middleware` filters routes
+  by middleware alias or class pattern, useful for internal/docs-only/admin
+  surfaces that share URI prefixes with public API routes.
+- **Configurable auth middleware aliases.** `auth_middleware` maps custom
+  middleware aliases (for example `internal.auth`) to OpenAPI security schemes,
+  while still supporting guard-aware `auth:*` defaults.
+- **Richer `documentator:check` output.** The check command now prints
+  documentation health metrics, supports `--json` for dashboards, and adds
+  `--suggest-hidden` to flag suspicious internal, debug, operational or tooling
+  routes that may need `#[Hidden]`, `routes.exclude`, or
+  `routes.exclude_middleware`.
+- **More inline response inference.** `ExtractInlineResponses` now recognizes
+  common Laravel response helpers, service-returned arrays, plain-text
+  responses, views and redirects, including non-JSON media types such as
+  `text/plain` and `text/html`.
+
+### Changed
+
+- **Built-in UI navigation scales further.** The explorer now persists method /
+  search filters, supports collapsed groups, and virtualizes the sidebar so large
+  specs remain responsive.
+- **Controller-less routes get better default tags.** In automatic grouping mode,
+  routes without controller methods are grouped from their path instead of always
+  landing under "Endpoints".
+- **Response emission preserves media type.** Explicit and inferred responses can
+  now be emitted as JSON, plain text, HTML or redirect-style responses instead of
+  forcing all documented content under `application/json`.
+
 ## [1.4.0] - 2026-06-27
 
 ### Added
@@ -187,7 +233,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (with a Scalar driver), Postman export, and the `documentator:generate`,
   `documentator:export` and `documentator:postman` commands.
 
-[Unreleased]: https://github.com/tsitsishvili/documentator/compare/v1.4.0...HEAD
+[Unreleased]: https://github.com/tsitsishvili/documentator/compare/v1.5.0...HEAD
+[1.5.0]: https://github.com/tsitsishvili/documentator/compare/v1.4.0...v1.5.0
 [1.4.0]: https://github.com/tsitsishvili/documentator/compare/v1.3.0...v1.4.0
 [1.3.0]: https://github.com/tsitsishvili/documentator/compare/v1.2.0...v1.3.0
 [1.2.0]: https://github.com/tsitsishvili/documentator/compare/v1.1.0...v1.2.0

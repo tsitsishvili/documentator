@@ -20,6 +20,8 @@
         window.__DOCUMENTATOR__ = {
             specUrl: @json($specUrl),
             title: @json($title),
+            sections: @json($sections ?? []),
+            currentSection: @json($currentSection ?? null),
             authStorage: @json($authStorage),
         };
     </script>

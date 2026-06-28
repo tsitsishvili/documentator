@@ -9,6 +9,8 @@ use Illuminate\Routing\Route;
 use PhpParser\Node;
 use PhpParser\NodeFinder;
 use ReflectionMethod;
+use ReflectionNamedType;
+use Throwable;
 use Tsitsishvili\Documentator\Data\EndpointData;
 use Tsitsishvili\Documentator\Data\ResponseData;
 use Tsitsishvili\Documentator\Extraction\ExtractionStrategy;
@@ -49,12 +51,15 @@ final class ExtractInlineResponses implements ExtractionStrategy
 
         $responses = [];
 
+        $services = $this->serviceVariables($method);
+        $variables = $this->variableSchemas($methodNode, $services);
+
         foreach ((new NodeFinder)->find($methodNode, fn (Node $node) => $node instanceof Node\Stmt\Return_) as $return) {
             if (! $return instanceof Node\Stmt\Return_ || ! $return->expr instanceof Node\Expr) {
                 continue;
             }
 
-            $response = $this->responseFromReturn($return->expr);
+            $response = $this->responseFromReturn($return->expr, $variables, $services);
 
             if ($response !== null) {
                 $responses[] = $response;
@@ -64,18 +69,26 @@ final class ExtractInlineResponses implements ExtractionStrategy
         return $responses;
     }
 
-    private function responseFromReturn(Node\Expr $expr): ?ResponseData
+    /**
+     * @param  array<string, array<string, mixed>>  $variables
+     * @param  array<string, class-string>  $services
+     */
+    private function responseFromReturn(Node\Expr $expr, array $variables = [], array $services = []): ?ResponseData
     {
-        if ($expr instanceof Node\Expr\Array_) {
+        if (($schema = $this->schemaForExpression($expr, $variables, $services)) !== null) {
             return new ResponseData(
                 status: 200,
                 description: $this->describe(200),
-                schema: $this->schemaForArray($expr),
+                schema: $schema,
             );
         }
 
         if ($expr instanceof Node\Expr\New_ && $this->isJsonResponseClass($expr->class)) {
-            return $this->jsonResponse($expr->args, 0, 1);
+            return $this->jsonResponse($expr->args, 0, 1, $variables, $services);
+        }
+
+        if ($expr instanceof Node\Expr\FuncCall && $expr->name instanceof Node\Name) {
+            return $this->functionResponse($expr, $variables, $services);
         }
 
         if (! $expr instanceof Node\Expr\MethodCall || ! $expr->name instanceof Node\Identifier) {
@@ -85,11 +98,81 @@ final class ExtractInlineResponses implements ExtractionStrategy
         $method = strtolower($expr->name->toString());
 
         if ($method === 'json' && $expr->var instanceof Node\Expr\FuncCall && $this->isNamedCall($expr->var, 'response')) {
-            return $this->jsonResponse($expr->args, 0, 1);
+            return $this->jsonResponse($expr->args, 0, 1, $variables, $services);
+        }
+
+        if ($method === 'make' && $expr->var instanceof Node\Expr\FuncCall && $this->isNamedCall($expr->var, 'response')) {
+            return $this->contentResponse($expr->args, 0, 1, $variables, $services);
+        }
+
+        if ($method === 'view' && $expr->var instanceof Node\Expr\FuncCall && $this->isNamedCall($expr->var, 'response')) {
+            return new ResponseData(
+                status: $this->statusFromArgs($expr->args, 2) ?? 200,
+                description: $this->describe($this->statusFromArgs($expr->args, 2) ?? 200),
+                schema: ['type' => 'string'],
+                mediaType: 'text/html',
+            );
         }
 
         if ($method === 'nocontent' && $expr->var instanceof Node\Expr\FuncCall && $this->isNamedCall($expr->var, 'response')) {
             $status = $this->statusFromArgs($expr->args, 0) ?? 204;
+
+            return new ResponseData(
+                status: $status,
+                description: $this->describe($status),
+            );
+        }
+
+        if ($this->isRedirectCall($expr)) {
+            $status = $this->statusFromArgs($expr->args, 1) ?? 302;
+
+            return new ResponseData(
+                status: $status,
+                description: $this->describe($status),
+            );
+        }
+
+        return null;
+    }
+
+    /**
+     * @param  array<string, array<string, mixed>>  $variables
+     * @param  array<string, class-string>  $services
+     */
+    private function functionResponse(Node\Expr\FuncCall $expr, array $variables, array $services): ?ResponseData
+    {
+        $name = strtolower($expr->name->toString());
+
+        if ($name === 'response') {
+            return $this->contentResponse($expr->args, 0, 1, $variables, $services);
+        }
+
+        if ($name === 'json') {
+            return $this->jsonResponse($expr->args, 0, 1, $variables, $services);
+        }
+
+        if ($name === 'view') {
+            $status = $this->statusFromArgs($expr->args, 2) ?? 200;
+
+            return new ResponseData(
+                status: $status,
+                description: $this->describe($status),
+                schema: ['type' => 'string'],
+                mediaType: 'text/html',
+            );
+        }
+
+        if (in_array($name, ['redirect', 'back', 'to_route'], true)) {
+            $status = $this->statusFromArgs($expr->args, $name === 'to_route' ? 2 : 1) ?? 302;
+
+            return new ResponseData(
+                status: $status,
+                description: $this->describe($status),
+            );
+        }
+
+        if ($name === 'abort') {
+            $status = $this->statusFromArgs($expr->args, 0) ?? 500;
 
             return new ResponseData(
                 status: $status,
@@ -102,12 +185,17 @@ final class ExtractInlineResponses implements ExtractionStrategy
 
     /**
      * @param  array<int, Node\Arg>  $args
+     * @param  array<string, array<string, mixed>>  $variables
+     * @param  array<string, class-string>  $services
      */
-    private function jsonResponse(array $args, int $bodyIndex, int $statusIndex): ?ResponseData
+    private function jsonResponse(array $args, int $bodyIndex, int $statusIndex, array $variables = [], array $services = []): ?ResponseData
     {
         $body = $this->argValue($args, $bodyIndex, 'data');
+        $schema = $body instanceof Node\Expr
+            ? $this->schemaForExpression($body, $variables, $services)
+            : null;
 
-        if (! $body instanceof Node\Expr\Array_) {
+        if ($schema === null) {
             return null;
         }
 
@@ -116,8 +204,45 @@ final class ExtractInlineResponses implements ExtractionStrategy
         return new ResponseData(
             status: $status,
             description: $this->describe($status),
-            schema: $this->schemaForArray($body),
+            schema: $schema,
         );
+    }
+
+    /**
+     * @param  array<int, Node\Arg>  $args
+     * @param  array<string, array<string, mixed>>  $variables
+     * @param  array<string, class-string>  $services
+     */
+    private function contentResponse(array $args, int $bodyIndex, int $statusIndex, array $variables = [], array $services = []): ?ResponseData
+    {
+        $body = $this->argValue($args, $bodyIndex, 'content');
+        $status = $this->statusFromArgs($args, $statusIndex) ?? 200;
+
+        if ($body === null) {
+            return new ResponseData(
+                status: $status,
+                description: $this->describe($status),
+            );
+        }
+
+        if (($schema = $this->schemaForExpression($body, $variables, $services)) !== null) {
+            return new ResponseData(
+                status: $status,
+                description: $this->describe($status),
+                schema: $schema,
+            );
+        }
+
+        if ($body instanceof Node\Scalar\String_) {
+            return new ResponseData(
+                status: $status,
+                description: $this->describe($status),
+                schema: ['type' => 'string'],
+                mediaType: 'text/plain',
+            );
+        }
+
+        return null;
     }
 
     /**
@@ -158,6 +283,32 @@ final class ExtractInlineResponses implements ExtractionStrategy
 
                 return is_int($value) ? $value : null;
             }
+        }
+
+        return null;
+    }
+
+    /**
+     * @param  array<string, array<string, mixed>>  $variables
+     * @param  array<string, class-string>  $services
+     * @return array<string, mixed>|null
+     */
+    private function schemaForExpression(Node\Expr $expr, array $variables = [], array $services = []): ?array
+    {
+        if ($expr instanceof Node\Expr\Array_) {
+            return $this->schemaForArray($expr);
+        }
+
+        if ($expr instanceof Node\Expr\Variable && is_string($expr->name)) {
+            return $variables[$expr->name] ?? null;
+        }
+
+        if ($expr instanceof Node\Expr\MethodCall) {
+            return $this->serviceCallSchema($expr, $services);
+        }
+
+        if ($expr instanceof Node\Expr\StaticCall) {
+            return $this->staticCallSchema($expr);
         }
 
         return null;
@@ -283,12 +434,140 @@ final class ExtractInlineResponses implements ExtractionStrategy
         return $call->name instanceof Node\Name && strtolower($call->name->toString()) === $name;
     }
 
+    private function isRedirectCall(Node\Expr\MethodCall $call): bool
+    {
+        if (! $call->name instanceof Node\Identifier) {
+            return false;
+        }
+
+        $method = strtolower($call->name->toString());
+
+        return in_array($method, ['route', 'to', 'away', 'secure', 'action', 'guest', 'intended'], true)
+            && $call->var instanceof Node\Expr\FuncCall
+            && $this->isNamedCall($call->var, 'redirect');
+    }
+
+    /**
+     * @return array<string, class-string>
+     */
+    private function serviceVariables(ReflectionMethod $method): array
+    {
+        $services = [];
+
+        foreach ($method->getParameters() as $parameter) {
+            $type = $parameter->getType();
+
+            if (! $type instanceof ReflectionNamedType || $type->isBuiltin()) {
+                continue;
+            }
+
+            $class = $type->getName();
+
+            if (class_exists($class)) {
+                $services[$parameter->getName()] = $class;
+            }
+        }
+
+        return $services;
+    }
+
+    /**
+     * @param  array<string, class-string>  $services
+     * @return array<string, array<string, mixed>>
+     */
+    private function variableSchemas(Node\Stmt\ClassMethod $methodNode, array $services): array
+    {
+        $variables = [];
+
+        foreach ((new NodeFinder)->find($methodNode, fn (Node $node) => $node instanceof Node\Expr\Assign) as $assign) {
+            if (! $assign instanceof Node\Expr\Assign
+                || ! $assign->var instanceof Node\Expr\Variable
+                || ! is_string($assign->var->name)
+                || ! $assign->expr instanceof Node\Expr) {
+                continue;
+            }
+
+            $schema = $this->schemaForExpression($assign->expr, $variables, $services);
+
+            if ($schema !== null) {
+                $variables[$assign->var->name] = $schema;
+            }
+        }
+
+        return $variables;
+    }
+
+    /**
+     * @param  array<string, class-string>  $services
+     * @return array<string, mixed>|null
+     */
+    private function serviceCallSchema(Node\Expr\MethodCall $call, array $services): ?array
+    {
+        if (! $call->var instanceof Node\Expr\Variable
+            || ! is_string($call->var->name)
+            || ! $call->name instanceof Node\Identifier
+            || ! isset($services[$call->var->name])) {
+            return null;
+        }
+
+        return $this->classMethodSchema($services[$call->var->name], $call->name->toString());
+    }
+
+    /**
+     * @return array<string, mixed>|null
+     */
+    private function staticCallSchema(Node\Expr\StaticCall $call): ?array
+    {
+        if (! $call->class instanceof Node\Name || ! $call->name instanceof Node\Identifier) {
+            return null;
+        }
+
+        return $this->classMethodSchema(ltrim($call->class->toString(), '\\'), $call->name->toString());
+    }
+
+    /**
+     * @return array<string, mixed>|null
+     */
+    private function classMethodSchema(string $class, string $method): ?array
+    {
+        if (! class_exists($class)) {
+            return null;
+        }
+
+        try {
+            $reflection = new ReflectionMethod($class, $method);
+            $returnType = $reflection->getReturnType();
+
+            if ($returnType instanceof ReflectionNamedType && $returnType->getName() !== 'array') {
+                return null;
+            }
+
+            $return = $this->source->firstReturnExpression($reflection);
+
+            return $return instanceof Node\Expr\Array_ ? $this->schemaForArray($return) : null;
+        } catch (Throwable) {
+            return null;
+        }
+    }
+
     private function describe(int $status): string
     {
         return match ($status) {
             201 => 'Created',
             202 => 'Accepted',
             204 => 'No content',
+            301 => 'Moved permanently',
+            302 => 'Found',
+            303 => 'See other',
+            307 => 'Temporary redirect',
+            308 => 'Permanent redirect',
+            400 => 'Bad request',
+            401 => 'Unauthenticated',
+            403 => 'Forbidden',
+            404 => 'Not found',
+            409 => 'Conflict',
+            422 => 'Validation error',
+            500 => 'Server error',
             default => 'Successful response',
         };
     }

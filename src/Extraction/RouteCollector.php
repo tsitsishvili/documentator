@@ -17,11 +17,13 @@ final class RouteCollector
     /**
      * @param  array<int, string>  $match
      * @param  array<int, string>  $exclude
+     * @param  array<int, string>  $excludeMiddleware
      */
     public function __construct(
         private readonly Router $router,
         private readonly array $match,
         private readonly array $exclude,
+        private readonly array $excludeMiddleware = [],
     ) {}
 
     /**
@@ -55,6 +57,27 @@ final class RouteCollector
             }
         }
 
+        foreach ($this->excludeMiddleware as $pattern) {
+            if ($this->usesMiddleware($route, $pattern)) {
+                return false;
+            }
+        }
+
         return true;
+    }
+
+    private function usesMiddleware(Route $route, string $pattern): bool
+    {
+        foreach ($route->gatherMiddleware() as $middleware) {
+            if (! is_string($middleware)) {
+                continue;
+            }
+
+            if (Str::is($pattern, $middleware) || Str::is($pattern, Str::before($middleware, ':'))) {
+                return true;
+            }
+        }
+
+        return false;
     }
 }

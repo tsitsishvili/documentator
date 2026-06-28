@@ -46,3 +46,24 @@ jobs:
 
       - name: Check code style
         run: vendor/bin/pint --test
+
+  browser:
+    runs-on: ubuntu-latest
+    name: Browser UI
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Run browser tests
+        run: npm run test:browser

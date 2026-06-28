@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Illuminate\Support\Facades\Route;
 use Tsitsishvili\Documentator\Documentator;
 
 afterEach(function () {
@@ -36,6 +37,58 @@ it('serves the built-in CSS and JS assets', function () {
     $this->get('/docs/assets/app.js')
         ->assertOk()
         ->assertHeader('Content-Type', 'text/javascript; charset=utf-8');
+});
+
+it('ships persistent filters and virtualized sidebar assets', function () {
+    $js = $this->get('/docs/assets/app.js')
+        ->assertOk()
+        ->getContent();
+    $css = $this->get('/docs/assets/app.css')
+        ->assertOk()
+        ->getContent();
+
+    expect($js)
+        ->toContain('collapsedGroups')
+        ->toContain("store.set('method'")
+        ->toContain('renderVirtualNav')
+        ->toContain('NAV_OVERSCAN')
+        ->not->toContain('All sections')
+        ->and($css)
+        ->toContain('.nav__spacer')
+        ->toContain('contain: layout style paint');
+});
+
+it('serves configured sections on separate paths with split OpenAPI documents', function () {
+    config([
+        'documentator.routes.match' => ['api/*', 'app/*'],
+        'documentator.grouping.sections' => [
+            'api' => 'API',
+            'app' => 'App',
+        ],
+    ]);
+
+    Route::get('api/ping', fn () => 'pong');
+    Route::get('app/ping', fn () => 'pong');
+
+    $this->get('/docs')->assertRedirect('/docs/api');
+    $this->get('/docs/missing')->assertNotFound();
+
+    $shell = $this->get('/docs/api')->assertOk()->getContent();
+
+    expect($shell)
+        ->toContain('docs\/api\/openapi.json')
+        ->toContain('"label":"API"')
+        ->toContain('"label":"App"');
+
+    $api = $this->getJson('/docs/api/openapi.json')->assertOk()->json();
+    $app = $this->getJson('/docs/app/openapi.json')->assertOk()->json();
+
+    expect($api['x-documentator-section'])->toBe('API')
+        ->and($api['paths'])->toHaveKey('/api/ping')
+        ->and($api['paths'])->not->toHaveKey('/app/ping')
+        ->and($app['x-documentator-section'])->toBe('App')
+        ->and($app['paths'])->toHaveKey('/app/ping')
+        ->and($app['paths'])->not->toHaveKey('/api/ping');
 });
 
 it('rejects asset names outside the whitelist', function () {

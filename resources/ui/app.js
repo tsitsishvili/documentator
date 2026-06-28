@@ -10,6 +10,10 @@
     var BODY_METHODS = { post: 1, put: 1, patch: 1, delete: 1 };
     var CONSOLE_MIN = 340;
     var CONSOLE_MAX = 760;
+    var NAV_HEIGHTS = { section: 34, group: 39, item: 54 };
+    var NAV_OVERSCAN = 8;
+    var navFrame = 0;
+    var navObserver = null;
 
     var cfg = window.__DOCUMENTATOR__ || {};
     var app = document.getElementById('app');
@@ -18,8 +22,14 @@
         spec: null,
         operations: [],
         servers: [],
+        sections: [],
+        sectionLinks: [],
+        sectionFilter: '',
+        methodFilter: '',
+        collapsedGroups: {},
         currentId: null,
         slugToId: {},
+        navRows: [],
     };
 
     /* ---------- helpers ---------- */
@@ -166,6 +176,19 @@
         get: function (name) { try { return localStorage.getItem(this.k(name)); } catch (e) { return null; } },
         set: function (name, value) { try { localStorage.setItem(this.k(name), value); } catch (e) { /* ignore */ } },
     };
+
+    function storeJson(name, fallback) {
+        try {
+            var raw = store.get(name);
+            return raw ? JSON.parse(raw) : fallback;
+        } catch (e) {
+            return fallback;
+        }
+    }
+
+    function persistJson(name, value) {
+        try { store.set(name, JSON.stringify(value || {})); } catch (e) { /* ignore */ }
+    }
     var authMemory = {};
     var authStore = {
         backend: function () {
@@ -200,13 +223,29 @@
         return (entry.op && entry.op.summary) || entry.path;
     }
 
+    function configuredSections() {
+        return Array.isArray(cfg.sections) ? cfg.sections.filter(function (section) {
+            return section && section.label;
+        }) : [];
+    }
+
+    function sectionByLabel(label) {
+        for (var i = 0; i < state.sectionLinks.length; i++) {
+            if (state.sectionLinks[i].label === label) return state.sectionLinks[i];
+        }
+
+        return null;
+    }
+
     function methodStats() {
         var counts = {};
         state.operations.forEach(function (entry) {
             counts[entry.method] = (counts[entry.method] || 0) + 1;
         });
         return METHODS.filter(function (method) { return counts[method]; }).map(function (method) {
-            return '<span class="topbar__method m-' + method + '">' + method.toUpperCase() + ' ' + counts[method] + '</span>';
+            var active = state.methodFilter === method ? ' is-active' : '';
+            return '<button class="topbar__method m-' + method + active + '" type="button" data-method-filter="' + method +
+                '" aria-pressed="' + (state.methodFilter === method ? 'true' : 'false') + '">' + method.toUpperCase() + ' ' + counts[method] + '</button>';
         }).join('');
     }
 
@@ -244,7 +283,19 @@
 
     function applyHash() {
         var id = state.slugToId[decodeURIComponent((location.hash || '').slice(1))];
-        if (id) { if (id !== state.currentId) select(id); } else { renderEmpty(); }
+        if (id) {
+            var entry = entryById(id);
+            if (entry && state.sectionFilter && entry.section !== state.sectionFilter) {
+                state.sectionFilter = entry.section || '';
+                store.set('section', state.sectionFilter);
+                var sectionFilter = document.getElementById('sectionFilter');
+                if (sectionFilter) sectionFilter.value = state.sectionFilter;
+                renderNav(document.getElementById('search').value);
+            }
+            if (id !== state.currentId) select(id);
+        } else {
+            renderEmpty();
+        }
     }
 
     /* Minimal, XSS-safe markdown: input is escaped first; output is a fixed tag set. */
@@ -316,12 +367,25 @@
                     method: method,
                     path: path,
                     op: op,
+                    section: op['x-documentator-section'] || '',
                     tag: (op.tags && op.tags[0]) || 'Endpoints',
                     tagVersion: op['x-documentator-group-version'] || '',
                 });
             });
         });
         state.operations = ops;
+        state.sectionLinks = configuredSections();
+        state.sections = state.sectionLinks.length
+            ? state.sectionLinks.map(function (section) { return section.label; })
+            : sectionNames(ops);
+        var currentSection = cfg.currentSection && cfg.currentSection.label ? cfg.currentSection.label : '';
+        var savedSection = store.get('section') || '';
+        state.sectionFilter = state.sections.indexOf(currentSection) !== -1
+            ? currentSection
+            : (state.sections.indexOf(savedSection) !== -1 ? savedSection : (state.sections[0] || ''));
+        var savedMethod = store.get('method') || '';
+        state.methodFilter = METHODS.indexOf(savedMethod) !== -1 ? savedMethod : '';
+        state.collapsedGroups = storeJson('collapsedGroups', {});
         state.slugToId = {};
         ops.forEach(function (entry) { entry.slug = slugFor(entry); state.slugToId[entry.slug] = entry.id; });
 
@@ -329,21 +393,46 @@
         state.servers = servers.length ? servers.map(function (s) { return s.url; }) : [location.origin];
     }
 
+    function sectionNames(ops) {
+        var seen = {};
+        var names = [];
+        ops.forEach(function (entry) {
+            if (!entry.section || seen[entry.section]) return;
+            seen[entry.section] = true;
+            names.push(entry.section);
+        });
+
+        return names;
+    }
+
     function groupsFor(filter) {
         var q = (filter || '').trim().toLowerCase();
         var order = [];
         var byGroup = {};
         state.operations.forEach(function (entry) {
-            var searchable = entry.method + ' ' + entry.path + ' ' + (entry.op.summary || '') + ' ' + entry.tag + ' ' + entry.tagVersion;
+            if (state.sectionFilter && entry.section !== state.sectionFilter) return;
+            if (state.methodFilter && entry.method !== state.methodFilter) return;
+            var searchable = entry.method + ' ' + entry.path + ' ' + (entry.op.summary || '') + ' ' + entry.section + ' ' + entry.tag + ' ' + entry.tagVersion;
             if (q && searchable.toLowerCase().indexOf(q) === -1) return;
-            var key = entry.tag + '\u0000' + entry.tagVersion;
+            var key = entry.section + '\u0000' + entry.tag + '\u0000' + entry.tagVersion;
             if (!byGroup[key]) {
-                byGroup[key] = { tag: entry.tag, version: entry.tagVersion, items: [] };
+                byGroup[key] = { section: entry.section, tag: entry.tag, version: entry.tagVersion, items: [] };
                 order.push(key);
             }
             byGroup[key].items.push(entry);
         });
-        return order.map(function (key) { return byGroup[key]; });
+        return order.map(function (key) { return byGroup[key]; }).sort(compareGroups);
+    }
+
+    function compareGroups(a, b) {
+        var sectionA = state.sections.indexOf(a.section);
+        var sectionB = state.sections.indexOf(b.section);
+        if (sectionA !== sectionB) return sectionA - sectionB;
+
+        var tag = a.tag.localeCompare(b.tag, undefined, { sensitivity: 'base', numeric: true });
+        if (tag !== 0) return tag;
+
+        return a.version.localeCompare(b.version, undefined, { sensitivity: 'base', numeric: true });
     }
 
     /* ---------- security ---------- */
@@ -406,6 +495,92 @@
         return (path.match(/\{(\w+)\}/g) || []).map(function (m) { return m.slice(1, -1); });
     }
 
+    function globalPathParameters() {
+        return state.spec['x-documentator-global-path-parameters'] || {};
+    }
+
+    function globalPathParameter(name) {
+        var params = globalPathParameters();
+
+        return Object.prototype.hasOwnProperty.call(params, name) ? (params[name] || {}) : null;
+    }
+
+    function globalPathInputValue(name) {
+        var form = document.getElementById('consoleForm');
+        var inputValue = null;
+
+        if (form) {
+            form.querySelectorAll('[data-kind="global-path"]').forEach(function (input) {
+                if (input.dataset.name === name) inputValue = input.value;
+            });
+        }
+
+        if (inputValue) return inputValue;
+
+        var saved = store.get('path:' + name);
+        if (saved) return saved;
+
+        var meta = globalPathParameter(name) || {};
+        if (meta.example !== undefined && meta.example !== null && meta.example !== '') return String(meta.example);
+
+        var schema = resolveSchema(meta.schema) || {};
+        var sampled = sample(schema);
+
+        return sampled === undefined || sampled === null ? '' : String(sampled);
+    }
+
+    function storeGlobalPathInput(input) {
+        if (!input || !input.dataset || input.dataset.kind !== 'global-path') return;
+        store.set('path:' + input.dataset.name, input.value || '');
+    }
+
+    function sectionFilterHtml() {
+        if (!state.sections.length) return '';
+
+        var options = state.sections.map(function (section) {
+            return '<option value="' + esc(section) + '"' + (section === state.sectionFilter ? ' selected' : '') + '>' + esc(section) + '</option>';
+        });
+
+        return '<select id="sectionFilter" class="sidebar__section" aria-label="Filter section">' + options.join('') + '</select>';
+    }
+
+    function healthMetrics() {
+        var tags = {};
+        var missingSummaries = 0;
+        var genericSummaries = 0;
+        var missingDescriptions = 0;
+        var genericSuccesses = 0;
+        var secured = 0;
+        var rootSecurity = !!(state.spec.security && state.spec.security.length);
+
+        state.operations.forEach(function (entry) {
+            var op = entry.op || {};
+            var summary = (op.summary || '').trim();
+            if (!summary) missingSummaries++;
+            else if (/^(Index|Show|Store|Update|Destroy|Create|Get|Post|Put|Patch|Delete|Handle|Invoke|Emit)$/i.test(summary)) genericSummaries++;
+            if (!(op.description || '').trim()) missingDescriptions++;
+            tags[entry.tag] = (tags[entry.tag] || 0) + 1;
+            if ((op.security && op.security.length) || (!Object.prototype.hasOwnProperty.call(op, 'security') && rootSecurity)) secured++;
+            Object.keys(op.responses || {}).forEach(function (code) {
+                var response = op.responses[code] || {};
+                if (code === '200' && response.description === 'Successful response' && !response.content) genericSuccesses++;
+            });
+        });
+
+        return {
+            operations: state.operations.length,
+            tags: Object.keys(tags).length,
+            singletonTags: Object.keys(tags).filter(function (tag) { return tags[tag] === 1; }).length,
+            missingSummaries: missingSummaries,
+            genericSummaries: genericSummaries,
+            missingDescriptions: missingDescriptions,
+            genericSuccesses: genericSuccesses,
+            securitySchemes: Object.keys(securitySchemes()).length,
+            secured: secured,
+            rootSecurity: rootSecurity,
+        };
+    }
+
     /* ---------- shell ---------- */
 
     function renderShell() {
@@ -422,11 +597,12 @@
                 '<button class="topbar__menu" id="menuBtn" aria-label="Toggle navigation">&#9776;</button>' +
                 '<div class="topbar__brand"><b>{ }</b>' + esc(info.title || cfg.title || 'API') + '</div>' +
                 version +
-                '<div class="topbar__meta" aria-label="API overview">' +
+                '<div class="topbar__meta" id="methodStats" aria-label="API overview">' +
                     '<span>' + esc(plural(state.operations.length, 'endpoint', 'endpoints')) + '</span>' +
                     methodStats() +
                 '</div>' +
                 '<div class="topbar__actions">' + authBtn +
+                    '<button class="topbar__health" id="healthBtn" type="button">Health</button>' +
                     '<button class="topbar__try" id="topbarTry" type="button" hidden>Try it</button>' +
                     '<a class="topbar__spec" href="' + esc(cfg.specUrl) + '" target="_blank" rel="noopener">openapi.json &#8599;</a>' +
                 '</div>' +
@@ -436,7 +612,8 @@
         app.appendChild(el(
             '<div class="layout">' +
                 '<aside class="sidebar" id="sidebar">' +
-                    '<div class="sidebar__search"><input id="search" type="search" placeholder="Search endpoints  ( / )" autocomplete="off"></div>' +
+                    '<div class="sidebar__filters"><input id="search" type="search" placeholder="Search endpoints  ( / )" autocomplete="off">' +
+                        sectionFilterHtml() + '</div>' +
                     '<nav class="nav" id="nav"></nav>' +
                 '</aside>' +
                 '<main class="doc" id="doc"></main>' +
@@ -456,6 +633,7 @@
         ));
         app.appendChild(el('<div class="scrim" id="scrim"></div>'));
         if (hasSecuritySchemes()) app.appendChild(el(authModalHtml()));
+        app.appendChild(el(healthModalHtml()));
 
         restoreConsoleWidth();
         wireShell();
@@ -466,15 +644,66 @@
 
     function wireShell() {
         document.getElementById('nav').addEventListener('click', function (e) {
+            var groupToggle = e.target.closest('[data-group-toggle]');
+            if (groupToggle) {
+                var key = groupToggle.dataset.groupToggle;
+                state.collapsedGroups[key] = !state.collapsedGroups[key];
+                persistJson('collapsedGroups', state.collapsedGroups);
+                renderNav(document.getElementById('search').value);
+                return;
+            }
+
             var btn = e.target.closest('.nav-item');
             if (btn) select(btn.dataset.id);
+        });
+        document.getElementById('methodStats').addEventListener('click', function (e) {
+            var btn = e.target.closest('[data-method-filter]');
+            if (!btn) return;
+            state.methodFilter = state.methodFilter === btn.dataset.methodFilter ? '' : btn.dataset.methodFilter;
+            store.set('method', state.methodFilter);
+            document.getElementById('methodStats').innerHTML = '<span>' + esc(plural(state.operations.length, 'endpoint', 'endpoints')) + '</span>' + methodStats();
+            renderNav(document.getElementById('search').value);
         });
         document.getElementById('search').addEventListener('input', function (e) {
             renderNav(e.target.value);
         });
+        document.getElementById('nav').addEventListener('scroll', renderVirtualNav);
+        if (window.ResizeObserver) {
+            if (navObserver) navObserver.disconnect();
+            navObserver = new ResizeObserver(scheduleVirtualNav);
+            navObserver.observe(document.getElementById('nav'));
+        } else {
+            window.addEventListener('resize', scheduleVirtualNav);
+        }
+        var sectionFilter = document.getElementById('sectionFilter');
+        if (sectionFilter) {
+            sectionFilter.addEventListener('change', function (e) {
+                var next = e.target.value || '';
+                var linked = sectionByLabel(next);
+
+                if (linked && linked.url) {
+                    location.href = linked.url + (location.hash || '');
+
+                    return;
+                }
+
+                state.sectionFilter = next || (state.sections[0] || '');
+                store.set('section', state.sectionFilter);
+                var filter = document.getElementById('search').value;
+                renderNav(filter);
+
+                var current = state.currentId ? entryById(state.currentId) : null;
+                if (state.sectionFilter && (!current || current.section !== state.sectionFilter)) {
+                    var first = firstVisibleEntry(filter);
+                    if (first) select(first.id);
+                    else renderEmpty();
+                }
+            });
+        }
         document.getElementById('send').addEventListener('click', send);
         document.getElementById('clearRequest').addEventListener('click', clearRequestInputs);
         document.getElementById('topbarTry').addEventListener('click', openConsole);
+        document.getElementById('healthBtn').addEventListener('click', openHealth);
 
         var sidebar = document.getElementById('sidebar');
         var consoleEl = document.getElementById('console');
@@ -485,7 +714,7 @@
 
         var form = document.getElementById('consoleForm');
         form.addEventListener('input', onFormInput);
-        form.addEventListener('change', updateSnippet); // selects + file pickers
+        form.addEventListener('change', onFormChange); // selects + file pickers
         form.addEventListener('click', onConsoleFormClick);
         wireConsoleResize();
 
@@ -498,6 +727,9 @@
             document.getElementById('authClear').addEventListener('click', clearAuth);
             authModal.addEventListener('click', function (e) { if (e.target === authModal) closeAuth(); });
         }
+        var healthModal = document.getElementById('healthModal');
+        document.getElementById('healthModalClose').addEventListener('click', closeHealth);
+        healthModal.addEventListener('click', function (e) { if (e.target === healthModal) closeHealth(); });
 
         window.addEventListener('hashchange', applyHash);
         document.addEventListener('keydown', onKeydown);
@@ -505,6 +737,7 @@
             if (isConsoleDocked()) {
                 applyConsoleWidth(parseInt(getComputedStyle(document.documentElement).getPropertyValue('--console'), 10) || 440, false);
             }
+            renderVirtualNav();
         });
     }
 
@@ -568,6 +801,12 @@
     function onFormInput(e) {
         var t = e.target;
         if (t && t.dataset && t.dataset.kind === 'server') store.set('server', t.value);
+        storeGlobalPathInput(t);
+        updateSnippet();
+    }
+
+    function onFormChange(e) {
+        storeGlobalPathInput(e.target);
         updateSnippet();
     }
 
@@ -582,6 +821,7 @@
         } else if (e.key === 'Escape') {
             var scrim = document.getElementById('scrim');
             closeAuth();
+            closeHealth();
             close(document.getElementById('sidebar'), scrim);
             close(document.getElementById('console'), scrim);
         }
@@ -678,31 +918,166 @@
         btn.innerHTML = on ? '&#128274; Authorized' : '&#128275; Authorize';
     }
 
+    /* ---------- health modal ---------- */
+
+    function healthModalHtml() {
+        return '<div class="modal" id="healthModal" hidden>' +
+            '<div class="modal__card healthmodal" role="dialog" aria-modal="true" aria-label="Documentation health">' +
+                '<div class="modal__head"><span>Documentation health</span>' +
+                    '<button class="modal__close" id="healthModalClose" type="button" aria-label="Close">&#10005;</button></div>' +
+                '<div class="modal__body" id="healthModalBody"></div>' +
+            '</div></div>';
+    }
+
+    function healthRow(label, value, warn) {
+        return '<div class="healthrow' + (warn ? ' is-warn' : '') + '">' +
+            '<span class="healthrow__label">' + esc(label) + '</span>' +
+            '<span class="healthrow__value">' + esc(value) + '</span>' +
+        '</div>';
+    }
+
+    function openHealth() {
+        var m = document.getElementById('healthModal');
+        var body = document.getElementById('healthModalBody');
+        if (!m || !body) return;
+
+        var h = healthMetrics();
+        body.innerHTML =
+            '<div class="healthgrid">' +
+                healthRow('Operations', h.operations, false) +
+                healthRow('Tags', h.tags + ' · ' + h.singletonTags + ' singletons', h.singletonTags >= 10 && h.singletonTags / Math.max(h.tags, 1) >= .6) +
+                healthRow('Secured', h.secured, h.securitySchemes > 0 && h.secured === 0 && !h.rootSecurity) +
+                healthRow('Missing summaries', h.missingSummaries, h.missingSummaries > 0) +
+                healthRow('Generic summaries', h.genericSummaries, h.genericSummaries > 0) +
+                healthRow('Missing descriptions', h.missingDescriptions, h.missingDescriptions > 0) +
+                healthRow('Generic 200s', h.genericSuccesses, h.genericSuccesses > 0) +
+            '</div>';
+        m.removeAttribute('hidden');
+    }
+
+    function closeHealth() {
+        var m = document.getElementById('healthModal');
+        if (m) m.setAttribute('hidden', '');
+    }
+
     /* ---------- navigation ---------- */
 
     function renderNav(filter) {
         var nav = document.getElementById('nav');
         var groups = groupsFor(filter);
         if (!groups.length) {
-            nav.innerHTML = '<p class="nav__empty">No matching endpoints.</p>';
+            state.navRows = [];
+            nav.innerHTML = '<p class="nav__empty">No matching endpoints' +
+                (state.sectionFilter ? ' in ' + esc(state.sectionFilter) : '') + '.</p>';
             return;
         }
-        nav.innerHTML = groups.map(function (group) {
-            var items = group.items.map(function (entry) {
-                var current = entry.id === state.currentId ? ' aria-current="true"' : '';
-                var dep = entry.op.deprecated ? ' is-deprecated' : '';
-                var summary = operationLabel(entry);
-                var summaryHtml = summary && summary !== entry.path
-                    ? '<span class="nav-item__summary">' + esc(summary) + '</span>' : '';
-                return '<li><button class="nav-item m-' + entry.method + dep + '" data-id="' + esc(entry.id) + '"' + current + '>' +
-                    '<span class="method m-' + entry.method + '">' + entry.method + '</span>' +
-                    '<span class="nav-item__main"><span class="nav-item__path">' + esc(entry.path) + '</span>' +
-                    summaryHtml + '</span></button></li>';
-            }).join('');
+        state.navRows = navRows(groups);
+        renderVirtualNav();
+        scheduleVirtualNav();
+    }
+
+    function navRows(groups) {
+        var currentSection = null;
+        var top = 0;
+        var rows = [];
+
+        function push(row) {
+            row.top = top;
+            row.height = NAV_HEIGHTS[row.type];
+            top += row.height;
+            rows.push(row);
+        }
+
+        groups.forEach(function (group) {
+            var key = group.section + '|' + group.tag + '|' + group.version;
+            var collapsed = !!state.collapsedGroups[key];
+
+            if (group.section && group.section !== currentSection) {
+                currentSection = group.section;
+                push({ type: 'section', section: group.section });
+            }
+
+            push({ type: 'group', key: key, group: group, collapsed: collapsed });
+
+            if (!collapsed) {
+                group.items.forEach(function (entry) {
+                    push({ type: 'item', entry: entry });
+                });
+            }
+        });
+
+        rows.totalHeight = top;
+
+        return rows;
+    }
+
+    function renderVirtualNav() {
+        var nav = document.getElementById('nav');
+        if (!nav || !state.navRows.length) return;
+
+        var scrollTop = nav.scrollTop;
+        var viewportHeight = nav.clientHeight || 1;
+        var total = state.navRows.totalHeight || 0;
+        var maxScroll = Math.max(0, total - viewportHeight);
+        if (scrollTop > maxScroll) {
+            nav.scrollTop = maxScroll;
+            scrollTop = maxScroll;
+        }
+        var start = Math.max(0, scrollTop - (NAV_OVERSCAN * NAV_HEIGHTS.item));
+        var end = scrollTop + viewportHeight + (NAV_OVERSCAN * NAV_HEIGHTS.item);
+        var visible = state.navRows.filter(function (row) {
+            return row.top + row.height >= start && row.top <= end;
+        });
+
+        nav.innerHTML = '<div class="nav__spacer" style="height:' + total + 'px">' +
+            visible.map(renderNavRow).join('') +
+        '</div>';
+    }
+
+    function scheduleVirtualNav() {
+        if (navFrame) cancelAnimationFrame(navFrame);
+
+        navFrame = requestAnimationFrame(function () {
+            navFrame = 0;
+            renderVirtualNav();
+        });
+    }
+
+    function renderNavRow(row) {
+        var style = 'style="transform:translateY(' + row.top + 'px);height:' + row.height + 'px"';
+
+        if (row.type === 'section') {
+            return '<h2 class="nav-section nav__row" ' + style + '>' + esc(row.section) + '</h2>';
+        }
+
+        if (row.type === 'group') {
+            var group = row.group;
             var version = group.version ? '<span class="nav-group__version">' + esc(group.version) + '</span>' : '';
-            return '<div class="nav-group"><h2 class="nav-group__title"><span class="nav-group__label"><span>' + esc(group.tag) + '</span>' + version + '</span>' +
-                '<span class="nav-group__count">' + group.items.length + '</span></h2><ul class="nav-list">' + items + '</ul></div>';
-        }).join('');
+
+            return '<div class="nav-group nav__row" ' + style + '>' +
+                '<button class="nav-group__title" type="button" data-group-toggle="' + esc(row.key) + '" aria-expanded="' + (row.collapsed ? 'false' : 'true') + '">' +
+                    '<span class="nav-group__label"><span class="nav-group__chev">' + (row.collapsed ? '+' : '-') + '</span><span>' + esc(group.tag) + '</span>' + version + '</span>' +
+                    '<span class="nav-group__count">' + group.items.length + '</span></button>' +
+            '</div>';
+        }
+
+        var entry = row.entry;
+        var current = entry.id === state.currentId ? ' aria-current="true"' : '';
+        var dep = entry.op.deprecated ? ' is-deprecated' : '';
+        var summary = operationLabel(entry);
+        var summaryHtml = summary && summary !== entry.path
+            ? '<span class="nav-item__summary">' + esc(summary) + '</span>' : '';
+
+        return '<div class="nav__row" ' + style + '><button class="nav-item m-' + entry.method + dep + '" data-id="' + esc(entry.id) + '"' + current + '>' +
+            '<span class="method m-' + entry.method + '">' + entry.method + '</span>' +
+            '<span class="nav-item__main"><span class="nav-item__path">' + esc(entry.path) + '</span>' +
+            summaryHtml + '</span></button></div>';
+    }
+
+    function firstVisibleEntry(filter) {
+        var groups = groupsFor(filter);
+
+        return groups.length && groups[0].items.length ? groups[0].items[0] : null;
     }
 
     /* ---------- documentation surface ---------- */
@@ -808,6 +1183,7 @@
             '<button class="endpoint__try" id="endpointTry" type="button">Try it</button></div>';
         html += '<h1 class="endpoint__summary">' + esc(op.summary || entry.path) + '</h1>';
         html += '<div class="endpoint__meta">' +
+            (entry.section ? '<span>' + esc(entry.section) + '</span>' : '') +
             '<span>' + esc(entry.tag) + '</span>' +
             (entry.tagVersion ? '<span>' + esc(entry.tagVersion) + '</span>' : '') +
             (op.operationId ? '<span>' + esc(op.operationId) + '</span>' : '') +
@@ -885,10 +1261,18 @@
 
     /* ---------- console ---------- */
 
+    function inputSample(schema, required) {
+        if (!required) return '';
+        var value = sample(schema);
+        if (Array.isArray(value)) value = value.length ? value[0] : '';
+        if (value && typeof value === 'object') return '';
+        return value === undefined || value === null ? '' : String(value);
+    }
+
     function field(label, controlHtml, required, hint) {
         var req = required ? '<span class="req">required</span>' : '';
         var note = hint ? '<span class="field__hint">' + esc(hint) + '</span>' : '';
-        return '<div class="field"><label class="field__label">' + esc(label) + req + note + '</label>' + controlHtml + '</div>';
+        return '<div class="field"><label class="field__label"><span class="field__name">' + esc(label) + '</span>' + req + note + '</label>' + controlHtml + '</div>';
     }
 
     function queryArrayName(name) {
@@ -901,10 +1285,10 @@
         return type === 'integer' || type === 'number' ? 'number' : 'text';
     }
 
-    function repeatValueRow(kind, name, ftype, placeholder, removable) {
+    function repeatValueRow(kind, name, ftype, placeholder, removable, value) {
         return '<div class="repeat__row">' +
             '<input class="input" type="' + esc(ftype) + '" data-kind="' + esc(kind) + '" data-array="true" data-name="' + esc(name) +
-                '" data-ftype="' + esc(ftype) + '" placeholder="' + esc(placeholder) + '">' +
+                '" data-ftype="' + esc(ftype) + '" value="' + esc(value || '') + '" placeholder="' + esc(placeholder) + '">' +
             '<button type="button" class="repeat__remove" data-repeat-remove aria-label="Remove ' + esc(name) + ' value" title="Remove"' +
                 (removable ? '' : ' disabled') + '>×</button>' +
         '</div>';
@@ -932,7 +1316,8 @@
                 group.dataset.name,
                 group.dataset.ftype || 'text',
                 group.dataset.placeholder || 'value',
-                true
+                true,
+                ''
             ));
             updateRepeatButtons(group);
             var last = items.querySelector('.repeat__row:last-child [data-array="true"]');
@@ -960,17 +1345,44 @@
             var itemSchema = resolveSchema(schema.items) || {};
             var itemType = schema.items ? schemaType(itemSchema) : 'string';
             var ftype = queryInputType(itemSchema);
+            var value = inputSample(itemSchema, param.required);
             var control = '<div class="repeat" data-repeat data-repeat-kind="query" data-name="' + esc(param.name) +
                 '" data-ftype="' + esc(ftype) + '" data-placeholder="' + esc(itemType) + '">' +
-                    '<div class="repeat__items">' + repeatValueRow('query', param.name, ftype, itemType, false) + '</div>' +
+                    '<div class="repeat__items">' + repeatValueRow('query', param.name, ftype, itemType, false, value) + '</div>' +
                     '<button type="button" class="repeat__add" data-repeat-add aria-label="Add ' + esc(param.name) + ' value" title="Add">+</button>' +
                 '</div>';
 
             return field(param.name, control, param.required, typeLbl);
         }
 
+        var valueAttr = inputSample(schema, param.required);
         return field(param.name, '<input class="input" type="text" data-kind="query" data-name="' + esc(param.name) +
-            '" data-ftype="text" placeholder="' + esc(typeLbl) + '">', param.required);
+            '" data-ftype="text" value="' + esc(valueAttr) + '" placeholder="' + esc(typeLbl) + '">', param.required);
+    }
+
+    function globalPathFieldControl(name) {
+        var meta = globalPathParameter(name) || {};
+        var schema = resolveSchema(meta.schema) || {};
+        var typeLbl = schemaType(schema);
+        var value = globalPathInputValue(name);
+        var attrs = 'data-kind="global-path" data-name="' + esc(name) + '"';
+        var control;
+
+        if (schema.enum) {
+            var hasValue = schema.enum.map(String).indexOf(value) !== -1;
+            var opts = (hasValue || !value ? [] : ['<option value="' + esc(value) + '" selected>' + esc(value) + '</option>'])
+                .concat(schema.enum.map(function (v) {
+                    var val = String(v);
+                    return '<option value="' + esc(val) + '"' + (val === value ? ' selected' : '') + '>' + esc(val) + '</option>';
+                }));
+            control = '<select class="select" ' + attrs + ' data-ftype="enum">' + opts.join('') + '</select>';
+        } else {
+            var inputType = typesOf(schema)[0] === 'integer' || typesOf(schema)[0] === 'number' ? 'number' : 'text';
+            control = '<input class="input" type="' + esc(inputType) + '" ' + attrs +
+                ' data-ftype="' + esc(inputType) + '" value="' + esc(value) + '" placeholder="' + esc(typeLbl) + '">';
+        }
+
+        return field(name, control, true, 'global');
     }
 
     /* The right control for one top-level body property, driven by its schema. */
@@ -984,15 +1396,20 @@
             var multiple = schema.type === 'array' ? ' multiple' : '';
             control = '<input class="input input--file" type="file" ' + attrs + ' data-ftype="file"' + multiple + '>';
         } else if (schema.enum) {
+            var enumValue = inputSample(schema, required);
             var opts = ['<option value="">—</option>'].concat(schema.enum.map(function (v) {
-                return '<option value="' + esc(v) + '">' + esc(v) + '</option>';
+                return '<option value="' + esc(v) + '"' + (String(v) === enumValue ? ' selected' : '') + '>' + esc(v) + '</option>';
             }));
             control = '<select class="select" ' + attrs + ' data-ftype="enum">' + opts.join('') + '</select>';
         } else if (typesOf(schema)[0] === 'boolean') {
+            var boolValue = inputSample(schema, required);
             control = '<select class="select" ' + attrs + ' data-ftype="boolean">' +
-                '<option value="">—</option><option value="true">true</option><option value="false">false</option></select>';
+                '<option value="">—</option><option value="true"' + (boolValue === 'true' ? ' selected' : '') + '>true</option>' +
+                '<option value="false"' + (boolValue === 'false' ? ' selected' : '') + '>false</option></select>';
         } else if (typesOf(schema)[0] === 'integer' || typesOf(schema)[0] === 'number') {
+            var numberValue = inputSample(schema, required);
             control = '<input class="input" type="number" ' + attrs + ' data-ftype="number" placeholder="' + esc(typeLbl) + '">';
+            if (numberValue !== '') control = '<input class="input" type="number" ' + attrs + ' data-ftype="number" value="' + esc(numberValue) + '" placeholder="' + esc(typeLbl) + '">';
         } else if (typesOf(schema)[0] === 'object' || (typesOf(schema)[0] === 'array' && schema.items && arrayItemIsObject(schema.items))) {
             var skeleton = JSON.stringify(sample(schema), null, 2);
             control = '<textarea class="textarea textarea--sm" ' + attrs + ' data-ftype="json" spellcheck="false">' + esc(skeleton) + '</textarea>';
@@ -1000,13 +1417,16 @@
             var itemSchema = resolveSchema(schema.items) || {};
             var itemType = schema.items ? schemaType(itemSchema) : 'string';
             var ftype = queryInputType(itemSchema);
+            var sampleValue = inputSample(itemSchema, required);
             control = '<div class="repeat" data-repeat data-repeat-kind="body-field" data-name="' + esc(name) +
                 '" data-ftype="' + esc(ftype) + '" data-placeholder="' + esc(itemType) + '">' +
-                    '<div class="repeat__items">' + repeatValueRow('body-field', name, ftype, itemType, false) + '</div>' +
+                    '<div class="repeat__items">' + repeatValueRow('body-field', name, ftype, itemType, false, sampleValue) + '</div>' +
                     '<button type="button" class="repeat__add" data-repeat-add aria-label="Add ' + esc(name) + ' value" title="Add">+</button>' +
                 '</div>';
         } else {
+            var textValue = inputSample(schema, required);
             control = '<input class="input" type="text" ' + attrs + ' data-ftype="text" placeholder="' + esc(typeLbl) + '">';
+            if (textValue !== '') control = '<input class="input" type="text" ' + attrs + ' data-ftype="text" value="' + esc(textValue) + '" placeholder="' + esc(typeLbl) + '">';
         }
 
         return field(name, control, required, typeLbl);
@@ -1061,9 +1481,17 @@
         }
 
         var pathParams = pathParamNames(entry.path);
-        if (pathParams.length) {
+        var globalPathParams = pathParams.filter(function (name) { return !!globalPathParameter(name); });
+        var localPathParams = pathParams.filter(function (name) { return !globalPathParameter(name); });
+
+        if (globalPathParams.length) {
+            html += '<div class="subhead">Globals</div>';
+            html += globalPathParams.map(globalPathFieldControl).join('');
+        }
+
+        if (localPathParams.length) {
             html += '<div class="subhead">Path</div>';
-            html += pathParams.map(function (name) {
+            html += localPathParams.map(function (name) {
                 return field(name, '<input class="input" type="text" data-kind="path" data-name="' + esc(name) + '" placeholder="' + esc(name) + '">', true);
             }).join('');
         }
@@ -1151,7 +1579,7 @@
             var name = input.dataset.name;
             if (input.dataset.ftype === 'file') {
                 var names = input.files ? Array.prototype.map.call(input.files, function (f) { return f.name; }) : [];
-                files.push({ name: name, filenames: names });
+                files.push({ name: name, filenames: names, multiple: input.multiple });
                 return;
             }
             if (input.value === '') return;
@@ -1180,6 +1608,11 @@
         var server = (form.querySelector('[data-kind="server"]') || {}).value || state.servers[0] || location.origin;
 
         var path = entry.path;
+        pathParamNames(entry.path).forEach(function (name) {
+            if (!globalPathParameter(name)) return;
+            var value = globalPathInputValue(name) || '{' + name + '}';
+            path = path.replace('{' + name + '}', encodeURIComponent(value));
+        });
         form.querySelectorAll('[data-kind="path"]').forEach(function (input) {
             var v = input.value || '{' + input.dataset.name + '}';
             path = path.replace('{' + input.dataset.name + '}', encodeURIComponent(v));
@@ -1226,6 +1659,7 @@
         return o;
     }
     function fileNames(file) {
+        if (!file.filenames.length && file.multiple) return ['path/to/file-1', 'path/to/file-2'];
         return file.filenames.length ? file.filenames : ['path/to/file'];
     }
 

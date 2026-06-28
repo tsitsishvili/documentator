@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Illuminate\Http\Resources\Json\JsonResource;
+use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Route;
 
 class CheckedResource extends JsonResource
@@ -15,6 +16,11 @@ class CheckedResource extends JsonResource
 
 class CheckedController
 {
+    /**
+     * List checked resources.
+     *
+     * Returns a typed resource so the generated success response has a schema.
+     */
     public function index(): CheckedResource
     {
         return new CheckedResource((object) ['id' => 1]);
@@ -66,4 +72,44 @@ it('detects drift from a committed spec', function () {
         ->assertExitCode(1);
 
     @unlink($path);
+});
+
+it('prints a documentation health summary', function () {
+    Route::get('api/raw', [CheckedController::class, 'raw']);
+
+    $this->artisan('documentator:check')
+        ->expectsOutputToContain('Documentation health:')
+        ->expectsOutputToContain('operation(s) missing descriptions')
+        ->expectsOutputToContain('generic 200 success response(s)')
+        ->assertExitCode(0);
+});
+
+it('emits dashboard-friendly json', function () {
+    Route::get('api/closure', fn () => 'x');
+    Route::get('api/checked', [CheckedController::class, 'index']);
+
+    $exit = Artisan::call('documentator:check', ['--json' => true, '--strict' => true]);
+    $payload = json_decode(Artisan::output(), true, flags: JSON_THROW_ON_ERROR);
+
+    expect($exit)->toBe(1)
+        ->and($payload['ok'])->toBeFalse()
+        ->and($payload['issues'][0]['message'])->toContain('closure route')
+        ->and($payload['health']['operations'])->toBe(2)
+        ->and($payload)->toHaveKeys(['validation_errors', 'drift', 'hidden_suggestions']);
+});
+
+it('suggests suspicious routes that may be hidden', function () {
+    Route::get('api/internal/reindex', [CheckedController::class, 'index'])->name('internal.reindex');
+    Route::get('api/public/checked', [CheckedController::class, 'index']);
+
+    $this->artisan('documentator:check', ['--suggest-hidden' => true])
+        ->expectsOutputToContain('may belong behind #[Hidden]')
+        ->expectsOutputToContain('GET /api/internal/reindex')
+        ->assertExitCode(0);
+
+    $exit = Artisan::call('documentator:check', ['--suggest-hidden' => true, '--json' => true]);
+    $payload = json_decode(Artisan::output(), true, flags: JSON_THROW_ON_ERROR);
+
+    expect($exit)->toBe(0)
+        ->and($payload['hidden_suggestions'][0]['endpoint'])->toBe('GET /api/internal/reindex');
 });

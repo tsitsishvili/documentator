@@ -88,8 +88,9 @@ return [
     |--------------------------------------------------------------------------
     |
     | `match` includes routes whose URI matches any of these patterns (Str::is
-    | wildcards). `exclude` removes routes whose URI or name matches. Routes
-    | marked #[Hidden] are always excluded.
+    | wildcards). `exclude` removes routes whose URI or name matches.
+    | `exclude_middleware` removes routes using matching middleware aliases or
+    | class names. Routes marked #[Hidden] are always excluded.
     |
     */
 
@@ -101,6 +102,62 @@ return [
             '_debugbar*',
             'sanctum/*',
         ],
+        'exclude_middleware' => [
+            // 'internal',
+            // 'can:admin-only',
+        ],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Grouping
+    |--------------------------------------------------------------------------
+    |
+    | Explicit #[Group] attributes always win. Without an attribute, "auto"
+    | groups controller actions by controller name and groups controller-less
+    | routes from the URI. Set "path" to group every route from its URI instead,
+    | or "controller" to keep the old controller-only behavior. `sections`
+    | split the built-in UI by route surface (for example API vs App) while
+    | keeping useful endpoint groups inside each section. Path grouping skips
+    | common prefixes and parameter-only segments by default, so
+    | /api/{locale}/orders lands under "Orders" instead of "Locale".
+    |
+    */
+
+    'grouping' => [
+        'source' => env('DOCUMENTATOR_GROUPING', 'auto'), // auto, controller, path
+        'path_depth' => 1,
+        'ignore_path_prefixes' => ['api'],
+        'ignore_path_parameters' => true,
+        'sections' => [
+            // 'api' => 'API',
+            // 'app' => 'App',
+        ],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Global path parameters
+    |--------------------------------------------------------------------------
+    |
+    | Describe route-wide placeholders once, such as a locale/tenant segment
+    | present on many routes. These values are applied to every matching path
+    | parameter before attributes run, so #[PathParam] can still override them.
+    | When path grouping is enabled, entries with "grouping" => false are skipped
+    | even if grouping.ignore_path_parameters is false.
+    |
+    | Example:
+    | 'pathlang' => [
+    |     'description' => 'Language code used by localized routes.',
+    |     'schema' => ['type' => 'string', 'enum' => ['ka', 'en', 'ru']],
+    |     'example' => 'ka',
+    |     'grouping' => false,
+    | ],
+    |
+    */
+
+    'global_path_parameters' => [
+        // 'pathlang' => ['description' => 'Language code.', 'example' => 'ka'],
     ],
 
     /*
@@ -198,6 +255,23 @@ return [
             'scheme' => 'bearer',
             'description' => 'Pass an API token as a Bearer header.',
         ],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Authentication middleware aliases
+    |--------------------------------------------------------------------------
+    |
+    | These patterns tell the extractor which route middleware imply an OpenAPI
+    | security requirement. The value is the security scheme key. Use null for
+    | guard-aware auth middleware: auth:sanctum maps to a "sanctum" scheme when
+    | one exists, otherwise it falls back to "default".
+    |
+    */
+
+    'auth_middleware' => [
+        'auth' => 'default',
+        'auth:*' => null,
     ],
 
     /*

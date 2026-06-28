@@ -20,5 +20,6 @@ final class ResponseData
         public ?array $schema = null,
         public ?string $collection = null,
         public ?bool $paginationLinks = null,
+        public ?string $mediaType = null,
     ) {}
 }

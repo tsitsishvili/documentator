@@ -64,6 +64,7 @@ final class OpenApiGenerator
             'servers' => config('documentator.servers', []),
             'security' => $globalScheme !== null ? [[$globalScheme => []]] : [],
             'tags' => array_values($tags),
+            'x-documentator-global-path-parameters' => $this->globalPathParameters(),
             'paths' => $paths,
             'components' => $components,
         ]);
@@ -137,6 +138,7 @@ final class OpenApiGenerator
             'requestBody' => $this->requestBody($endpoint),
             'responses' => $this->responses($endpoint),
             'deprecated' => $endpoint->deprecated ?: null,
+            'x-documentator-section' => $this->sectionFor($endpoint),
             'x-documentator-group-version' => $endpoint->groupVersion,
         ], fn ($value) => $value !== null && $value !== []);
 
@@ -177,7 +179,7 @@ final class OpenApiGenerator
     {
         $schema = $this->schema($param);
 
-        return array_filter([
+        $parameter = array_filter([
             'name' => $param->name,
             'in' => $in,
             'required' => $required,
@@ -185,6 +187,12 @@ final class OpenApiGenerator
             'schema' => $schema,
             'example' => $param->example ?? ($this->generatesExamples() ? SchemaSampler::sample($schema) : null),
         ], fn ($value) => $value !== null);
+
+        if ($in === 'path' && $this->globalPathParameter($param->name) !== null) {
+            $parameter['x-documentator-global'] = true;
+        }
+
+        return $parameter;
     }
 
     private function generatesExamples(): bool
@@ -302,12 +310,14 @@ final class OpenApiGenerator
 
         $body = ['description' => $description];
 
+        $mediaType = $response->mediaType ?? 'application/json';
+
         if ($response->example !== null) {
-            $body['content'] = ['application/json' => ['example' => $response->example]];
+            $body['content'] = [$mediaType => ['example' => $response->example]];
         } elseif ($response->schema !== null) {
-            $body['content'] = ['application/json' => ['schema' => $this->responseSchema($response)]];
+            $body['content'] = [$mediaType => ['schema' => $this->responseSchema($response)]];
         } elseif ($response->resource !== null) {
-            $body['content'] = ['application/json' => ['schema' => ['type' => 'object']]];
+            $body['content'] = [$mediaType => ['schema' => ['type' => 'object']]];
         }
 
         return $body;
@@ -475,22 +485,173 @@ final class OpenApiGenerator
         return '/'.ltrim(str_replace('?}', '}', $uri), '/');
     }
 
+    private function sectionFor(EndpointData $endpoint): ?string
+    {
+        $uri = trim($endpoint->uri, '/');
+        $first = Str::before($uri, '/');
+
+        foreach ((array) config('documentator.grouping.sections', []) as $pattern => $label) {
+            if (is_int($pattern)) {
+                if (! is_string($label)) {
+                    continue;
+                }
+
+                $pattern = $label;
+                $label = Str::headline($label);
+            }
+
+            $pattern = trim((string) $pattern, '/');
+
+            if ($pattern === '' || ! is_string($label)) {
+                continue;
+            }
+
+            if ($pattern === $first || Str::is($pattern, $uri)) {
+                return $label;
+            }
+        }
+
+        return null;
+    }
+
     private function tagFor(EndpointData $endpoint): string
     {
         if ($endpoint->group !== null) {
             return $endpoint->group;
         }
 
-        if ($endpoint->controller !== null) {
-            return Str::headline(Str::replaceLast('Controller', '', class_basename($endpoint->controller)));
+        $source = (string) config('documentator.grouping.source', 'auto');
+
+        if ($source === 'path') {
+            return $this->pathTagFor($endpoint) ?? $this->controllerTagFor($endpoint) ?? 'Endpoints';
         }
 
-        return 'Endpoints';
+        if ($source === 'auto' && $endpoint->controller === null) {
+            return $this->pathTagFor($endpoint) ?? 'Endpoints';
+        }
+
+        return $this->controllerTagFor($endpoint) ?? 'Endpoints';
+    }
+
+    private function controllerTagFor(EndpointData $endpoint): ?string
+    {
+        if ($endpoint->controller === null) {
+            return null;
+        }
+
+        return Str::headline(Str::replaceLast('Controller', '', class_basename($endpoint->controller)));
+    }
+
+    private function pathTagFor(EndpointData $endpoint): ?string
+    {
+        $segments = [];
+        $depth = max(1, (int) config('documentator.grouping.path_depth', 1));
+        $ignorePrefixes = array_map('strtolower', (array) config('documentator.grouping.ignore_path_prefixes', ['api']));
+        $ignorePathParameters = (bool) config('documentator.grouping.ignore_path_parameters', true);
+
+        foreach (explode('/', trim($endpoint->uri, '/')) as $segment) {
+            if ($segment === '') {
+                continue;
+            }
+
+            $parameter = $this->pathParameterName($segment);
+            $normalized = strtolower($parameter ?? $segment);
+
+            if ($parameter === null && in_array($normalized, $ignorePrefixes, true)) {
+                continue;
+            }
+
+            if ($parameter !== null && ($ignorePathParameters || $this->globalPathParameterSkipsGrouping($parameter))) {
+                continue;
+            }
+
+            $segments[] = $parameter ?? $segment;
+
+            if (count($segments) >= $depth) {
+                break;
+            }
+        }
+
+        if ($segments === []) {
+            return null;
+        }
+
+        return Str::headline(implode(' ', $segments));
+    }
+
+    private function pathParameterName(string $segment): ?string
+    {
+        if (preg_match('/^\{(\w+)(?::[^}?]+)?\??\}$/', $segment, $matches) !== 1) {
+            return null;
+        }
+
+        return $matches[1];
+    }
+
+    private function globalPathParameterSkipsGrouping(string $name): bool
+    {
+        $parameter = $this->globalPathParameter($name);
+
+        return is_array($parameter) && ($parameter['grouping'] ?? true) === false;
+    }
+
+    /**
+     * @return array<string, mixed>|null
+     */
+    private function globalPathParameter(string $name): ?array
+    {
+        foreach ((array) config('documentator.global_path_parameters', []) as $key => $value) {
+            if (is_int($key)) {
+                if ($value === $name) {
+                    return [];
+                }
+
+                continue;
+            }
+
+            if ($key === $name) {
+                return is_array($value) ? $value : [];
+            }
+        }
+
+        return null;
     }
 
     private function tagKey(string $name, ?string $version): string
     {
         return $version === null ? $name : $name.'|'.$version;
+    }
+
+    /**
+     * @return array<string, array<string, mixed>>
+     */
+    private function globalPathParameters(): array
+    {
+        $parameters = [];
+
+        foreach ((array) config('documentator.global_path_parameters', []) as $name => $value) {
+            if (is_int($name)) {
+                if (! is_string($value)) {
+                    continue;
+                }
+
+                $name = $value;
+                $value = [];
+            }
+
+            $config = is_array($value) ? $value : [];
+            $parameter = array_filter([
+                'description' => $config['description'] ?? null,
+                'schema' => isset($config['schema']) && is_array($config['schema'])
+                    ? $config['schema']
+                    : (isset($config['type']) && is_string($config['type']) ? ['type' => $config['type']] : null),
+                'example' => $config['example'] ?? null,
+            ], fn ($field) => $field !== null);
+
+            $parameters[(string) $name] = $parameter;
+        }
+
+        return $parameters;
     }
 
     /**

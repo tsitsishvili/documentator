@@ -92,6 +92,64 @@ class ImprovementAttributeController
     }
 }
 
+class ImprovementLocalizedEventController
+{
+    public function emit(): void
+    {
+        //
+    }
+}
+
+class ImprovementPayloadService
+{
+    public function summary(): array
+    {
+        return [
+            'id' => 1,
+            'email' => 'ada@example.com',
+            'active' => true,
+        ];
+    }
+
+    public static function staticSummary(): array
+    {
+        return [
+            'team_id' => 5,
+            'created_at' => '2026-01-01T00:00:00Z',
+        ];
+    }
+}
+
+class ImprovementResponseHelperController
+{
+    public function helperJson(ImprovementPayloadService $service)
+    {
+        $payload = $service->summary();
+
+        return response()->json($payload, 202);
+    }
+
+    public function staticService()
+    {
+        return ImprovementPayloadService::staticSummary();
+    }
+
+    public function plainText()
+    {
+        return response('accepted', 202);
+    }
+
+    public function html()
+    {
+        return view('welcome');
+    }
+
+    public function redirect()
+    {
+        return to_route('login');
+    }
+}
+
 class ImprovementCustomStrategy implements ExtractionStrategy
 {
     public function __invoke(EndpointData $endpoint, LaravelRoute $route, ?ReflectionMethod $method): EndpointData
@@ -183,6 +241,32 @@ it('infers named auth schemes and ability scopes from middleware', function () {
     expect($operation['security'])->toBe([['sanctum' => ['orders:read', 'orders:write']]]);
 });
 
+it('infers security from configured auth middleware aliases', function () {
+    config([
+        'documentator.security.internal' => ['type' => 'apiKey', 'in' => 'header', 'name' => 'X-Internal-Key'],
+        'documentator.auth_middleware' => ['internal.auth' => 'internal'],
+    ]);
+
+    Route::get('api/improvements/internal', fn () => 'ok')
+        ->middleware('internal.auth');
+
+    $operation = app(Documentator::class)->toOpenApi()['paths']['/api/improvements/internal']['get'];
+
+    expect($operation['security'])->toBe([['internal' => []]]);
+});
+
+it('can exclude routes by middleware alias', function () {
+    config(['documentator.routes.exclude_middleware' => ['internal*']]);
+
+    Route::get('api/improvements/public', fn () => 'ok');
+    Route::get('api/improvements/internal', fn () => 'ok')->middleware('internal.docs');
+
+    $paths = app(Documentator::class)->toOpenApi()['paths'];
+
+    expect($paths)->toHaveKey('/api/improvements/public')
+        ->not->toHaveKey('/api/improvements/internal');
+});
+
 it('runs configured extraction strategies and OpenAPI transformers', function () {
     config([
         'documentator.extensions.strategies' => [ImprovementCustomStrategy::class],
@@ -195,4 +279,102 @@ it('runs configured extraction strategies and OpenAPI transformers', function ()
 
     expect($spec['x-documentator-test'])->toBeTrue()
         ->and($spec['paths']['/api/improvements/extended']['get']['description'])->toBe('Injected by a custom strategy.');
+});
+
+it('applies configured global path parameter metadata', function () {
+    config([
+        'documentator.global_path_parameters' => [
+            'pathlang' => [
+                'description' => 'Language code used by localized routes.',
+                'schema' => ['type' => 'string', 'enum' => ['ka', 'en']],
+                'example' => 'ka',
+            ],
+        ],
+    ]);
+
+    Route::get('api/{pathlang}/improvements/localized', [ImprovementLocalizedEventController::class, 'emit']);
+
+    $spec = app(Documentator::class)->toOpenApi();
+    $parameter = $spec['paths']['/api/{pathlang}/improvements/localized']['get']['parameters'][0];
+
+    expect($parameter['name'])->toBe('pathlang')
+        ->and($parameter['description'])->toBe('Language code used by localized routes.')
+        ->and($parameter['schema'])->toBe([
+            'type' => 'string',
+            'enum' => ['ka', 'en'],
+            'description' => 'Language code used by localized routes.',
+        ])
+        ->and($parameter['example'])->toBe('ka')
+        ->and($parameter['x-documentator-global'])->toBeTrue()
+        ->and($spec['x-documentator-global-path-parameters']['pathlang'])->toBe([
+            'description' => 'Language code used by localized routes.',
+            'schema' => ['type' => 'string', 'enum' => ['ka', 'en']],
+            'example' => 'ka',
+        ]);
+});
+
+it('can group localized routes by path while skipping configured global parameters', function () {
+    config([
+        'documentator.grouping.source' => 'path',
+        'documentator.grouping.ignore_path_parameters' => false,
+        'documentator.global_path_parameters' => [
+            'pathlang' => ['grouping' => false],
+        ],
+    ]);
+
+    Route::post('api/{pathlang}/event/emit', [ImprovementLocalizedEventController::class, 'emit']);
+
+    $spec = app(Documentator::class)->toOpenApi();
+    $operation = $spec['paths']['/api/{pathlang}/event/emit']['post'];
+
+    expect($operation['tags'])->toBe(['Event'])
+        ->and($spec['tags'])->toContain(['name' => 'Event']);
+});
+
+it('groups controller-less routes by path in auto mode', function () {
+    Route::get('api/{pathlang}/health/check', fn () => 'ok');
+
+    $operation = app(Documentator::class)
+        ->toOpenApi()['paths']['/api/{pathlang}/health/check']['get'];
+
+    expect($operation['tags'])->toBe(['Health']);
+});
+
+it('can split the built-in UI into configured route sections', function () {
+    config([
+        'documentator.routes.match' => ['api/*', 'app/*'],
+        'documentator.grouping.sections' => [
+            'api' => 'API',
+            'app' => 'App',
+        ],
+    ]);
+
+    Route::get('api/{pathlang}/user/auction/myauctions', [ImprovementLocalizedEventController::class, 'emit']);
+    Route::get('app/{pathlang}/user/auction/myauctions', [ImprovementLocalizedEventController::class, 'emit']);
+
+    $paths = app(Documentator::class)->toOpenApi()['paths'];
+
+    expect($paths['/api/{pathlang}/user/auction/myauctions']['get']['x-documentator-section'])->toBe('API')
+        ->and($paths['/app/{pathlang}/user/auction/myauctions']['get']['x-documentator-section'])->toBe('App');
+});
+
+it('infers common Laravel response helpers and service-returned arrays', function () {
+    Route::get('api/improvements/helper-json', [ImprovementResponseHelperController::class, 'helperJson']);
+    Route::get('api/improvements/static-service', [ImprovementResponseHelperController::class, 'staticService']);
+    Route::get('api/improvements/plain-text', [ImprovementResponseHelperController::class, 'plainText']);
+    Route::get('api/improvements/html', [ImprovementResponseHelperController::class, 'html']);
+    Route::get('api/improvements/redirect', [ImprovementResponseHelperController::class, 'redirect'])->name('login');
+
+    $paths = app(Documentator::class)->toOpenApi()['paths'];
+    $helper = $paths['/api/improvements/helper-json']['get']['responses']['202']['content']['application/json']['schema']['properties'];
+    $static = $paths['/api/improvements/static-service']['get']['responses']['200']['content']['application/json']['schema']['properties'];
+
+    expect($helper['id']['type'])->toBe('integer')
+        ->and($helper['email']['format'])->toBe('email')
+        ->and($helper['active']['type'])->toBe('boolean')
+        ->and($static['team_id']['type'])->toBe('integer')
+        ->and($static['created_at']['format'])->toBe('date-time')
+        ->and($paths['/api/improvements/plain-text']['get']['responses']['202']['content']['text/plain']['schema']['type'])->toBe('string')
+        ->and($paths['/api/improvements/html']['get']['responses']['200']['content']['text/html']['schema']['type'])->toBe('string')
+        ->and($paths['/api/improvements/redirect']['get']['responses']['302']['description'])->toBe('Found');
 });

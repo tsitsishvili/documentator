@@ -35,11 +35,24 @@ final class ExtractRouteMetadata implements ExtractionStrategy
 
         foreach ($this->pathParameters($route->uri()) as $name => $required) {
             $type = $this->pathParameterType($name, $route, $method);
+            $global = $this->globalPathParameter($name);
+            $schema = $global['schema'] ?? ['type' => $global['type'] ?? $type];
+
+            if (! is_array($schema)) {
+                $schema = ['type' => $type];
+            }
+
+            if (isset($schema['type']) && is_string($schema['type'])) {
+                $type = $schema['type'];
+            }
+
             $endpoint->pathParameters[$name] = new ParameterData(
                 name: $name,
                 type: $type,
                 required: $required,
-                schema: ['type' => $type],
+                description: $global['description'] ?? null,
+                example: $global['example'] ?? null,
+                schema: $schema,
             );
         }
 
@@ -150,6 +163,28 @@ final class ExtractRouteMetadata implements ExtractionStrategy
     }
 
     /**
+     * @return array<string, mixed>
+     */
+    private function globalPathParameter(string $name): array
+    {
+        foreach ((array) config('documentator.global_path_parameters', []) as $key => $value) {
+            if (is_int($key)) {
+                if ($value === $name) {
+                    return [];
+                }
+
+                continue;
+            }
+
+            if ($key === $name) {
+                return is_array($value) ? $value : [];
+            }
+        }
+
+        return [];
+    }
+
+    /**
      * The OpenAPI type of the field a route parameter is bound to via implicit
      * model binding: the model's key type when it's bound by primary key, or
      * `string` for a custom field (`{post:slug}`, a uuid route key). Null when the
@@ -188,25 +223,67 @@ final class ExtractRouteMetadata implements ExtractionStrategy
     private function authScheme(Route $route): ?string
     {
         foreach ($route->gatherMiddleware() as $middleware) {
-            if (! is_string($middleware) || ! Str::startsWith($middleware, ['auth', 'auth:'])) {
+            if (! is_string($middleware)) {
                 continue;
             }
 
-            $guard = Str::after($middleware, 'auth:');
+            $scheme = $this->authSchemeForMiddleware($middleware);
 
-            if ($guard !== $middleware) {
-                $guard = trim(Str::before($guard, ','));
-                $schemes = (array) config('documentator.security', []);
+            if ($scheme !== null) {
+                return $scheme;
+            }
+        }
 
-                if ($guard !== '' && array_key_exists($guard, $schemes)) {
-                    return $guard;
-                }
+        return null;
+    }
+
+    private function authSchemeForMiddleware(string $middleware): ?string
+    {
+        foreach ((array) config('documentator.auth_middleware', []) as $pattern => $scheme) {
+            if (is_int($pattern)) {
+                $pattern = (string) $scheme;
+                $scheme = true;
+            }
+
+            if (! is_string($pattern) || ! $this->middlewareMatches($middleware, $pattern)) {
+                continue;
+            }
+
+            if (is_string($scheme) && $scheme !== '') {
+                return $scheme;
+            }
+
+            $guard = $this->guardFromMiddleware($middleware);
+            $schemes = (array) config('documentator.security', []);
+
+            if ($guard !== null && array_key_exists($guard, $schemes)) {
+                return $guard;
             }
 
             return 'default';
         }
 
         return null;
+    }
+
+    private function middlewareMatches(string $middleware, string $pattern): bool
+    {
+        if (! str_contains($pattern, '*') && ! str_contains($pattern, ':')) {
+            return $middleware === $pattern;
+        }
+
+        return Str::is($pattern, $middleware) || Str::is($pattern, Str::before($middleware, ':'));
+    }
+
+    private function guardFromMiddleware(string $middleware): ?string
+    {
+        if (! str_contains($middleware, ':')) {
+            return null;
+        }
+
+        $guard = trim(Str::before(Str::after($middleware, ':'), ','));
+
+        return $guard === '' ? null : $guard;
     }
 
     /**

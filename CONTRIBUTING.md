@@ -17,6 +17,7 @@ git clone https://github.com/tsitsishvili/documentator.git
 cd documentator
 composer install
 composer test    # make sure the suite is green before you change anything
+npm ci           # only needed when you touch the built-in UI / browser tests
 ```
 
 ## Development workflow
@@ -26,10 +27,12 @@ composer test                              # run the full Pest suite
 vendor/bin/pest --filter=GeneratesOpenApi  # run a single test file / case
 composer lint                              # apply Laravel Pint formatting
 composer lint:test                         # check formatting without writing (CI mode)
+npm run test:browser                       # Playwright visual/UI checks
 ```
 
 There is no build step. Before opening a pull request, make sure **both
-`composer test` and `composer lint:test` pass**.
+`composer test` and `composer lint:test` pass**. Run `npm run test:browser` too
+when the built-in explorer, docs shell, or UI assets change.
 
 ## How the package is structured
 
@@ -59,11 +62,16 @@ sequence, then `ExtractAttributes` runs last so attributes override everything.
    from the controller method's PHPDoc.
 2. `ExtractFormRequestRules` — params from a type-hinted FormRequest's `rules()`
    (query params for GET/HEAD, body params otherwise).
-3. `ExtractDataObjects` — the same for spatie/laravel-data objects (no-op unless installed).
-4. `ExtractResponses` — a success response from an API Resource, `ResourceCollection`,
-   or Eloquent model return type.
-5. `ExtractErrorResponses` — conventional 401/403/404/422 responses inferred from shape.
-6. `ExtractAttributes` — explicit PHP attributes, applied unconditionally.
+3. `ExtractInlineValidationRules` — literal `$request->validate([...])` arrays
+   parsed from the controller body.
+4. `ExtractDataObjects` — the same for spatie/laravel-data objects (no-op unless installed).
+5. `ExtractResponses` — a success response from an API Resource, `ResourceCollection`,
+   `Resource::collection(...)` return statement, or Eloquent model return type.
+6. `ExtractInlineResponses` — literal JSON responses, service-returned arrays,
+   Laravel response helpers, views and redirects from the controller body.
+7. `ExtractErrorResponses` — conventional 401/403/404/422 responses inferred from shape.
+8. Custom strategies from `extensions.strategies`.
+9. `ExtractAttributes` — explicit PHP attributes, applied unconditionally.
 
 Inference strategies must stay non-destructive (`$endpoint->bodyParameters[$name] ??= …`);
 only `ExtractAttributes` assigns unconditionally.
@@ -73,8 +81,19 @@ only `ExtractAttributes` assigns unconditionally.
 1. Add a strategy class in `src/Extraction/Strategies/` implementing `ExtractionStrategy`.
 2. Register it in the `ExtractorPipeline` binding in
    `DocumentatorServiceProvider::register()`, **before `ExtractAttributes`** so it
-   stays overridable.
+   stays overridable. If it is app-specific rather than package behavior, document
+   it as an `extensions.strategies` example instead of adding it to the default
+   package pipeline.
 3. Fill gaps with `??=` — never overwrite a value another strategy set.
+4. Wrap reflection, AST parsing, model instantiation and user-code evaluation in
+   `try/catch`; one bad route must not break the generated document.
+
+### Adding OpenAPI output customization
+
+Prefer consuming `Documentator::toOpenApi()` instead of creating a second
+pipeline. Organization-specific naming, tags or metadata should usually be an
+`extensions.openapi_transformers` callable that receives the generated spec array
+and returns the modified array.
 
 ### Adding a new attribute
 
@@ -100,6 +119,7 @@ Full details are in [CODING_STANDARDS.md](CODING_STANDARDS.md). The essentials:
   at the top of the test file.
 - Use real `[Controller::class, 'method']` routes — **closure routes skip the
   reflection-based strategies**, so they won't exercise extraction.
+- UI asset changes should include or update a browser test under `tests/Browser/`.
 - Every behavior change or bug fix should come with a test.
 
 ## Pull requests

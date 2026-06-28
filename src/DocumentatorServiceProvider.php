@@ -38,6 +38,7 @@ final class DocumentatorServiceProvider extends ServiceProvider
                 $app['router'],
                 (array) config('documentator.routes.match', ['api/*']),
                 (array) config('documentator.routes.exclude', []),
+                (array) config('documentator.routes.exclude_middleware', []),
             );
         });
 
@@ -103,9 +104,15 @@ final class DocumentatorServiceProvider extends ServiceProvider
         ], function (Router $router) {
             $router->get('/', [DocsController::class, 'index'])->name('documentator.ui');
             $router->get('/openapi.json', [OpenApiController::class, 'show'])->name('documentator.openapi');
+            $router->get('/{section}/openapi.json', [OpenApiController::class, 'show'])
+                ->where('section', '[A-Za-z0-9_-]+')
+                ->name('documentator.openapi.section');
             $router->get('/assets/{asset}', [AssetController::class, 'show'])
                 ->where('asset', 'app\.(css|js)')
                 ->name('documentator.asset');
+            $router->get('/{section}', [DocsController::class, 'index'])
+                ->where('section', '[A-Za-z0-9_-]+')
+                ->name('documentator.ui.section');
         });
     }
 }

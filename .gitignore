@@ -26,6 +26,7 @@ Thumbs.db
 /coverage/
 /build/
 /.cache/
+/test-results/
 
 # Logs and temporary files
 *.log
