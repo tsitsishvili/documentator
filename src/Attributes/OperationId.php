@@ -6,9 +6,9 @@ namespace Tsitsishvili\Documentator\Attributes;
 
 use Attribute;
 
-/** A short, one-line title for the endpoint. */
+/** Overrides the generated OpenAPI operationId. */
 #[Attribute(Attribute::TARGET_METHOD | Attribute::TARGET_FUNCTION)]
-final class Summary
+final class OperationId
 {
-    public function __construct(public string $text) {}
+    public function __construct(public string $id) {}
 }

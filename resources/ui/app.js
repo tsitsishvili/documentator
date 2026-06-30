@@ -1192,7 +1192,7 @@
         if (auth) html += '<div class="endpoint__auth">Requires authentication · ' + esc(auth.key) + '</div>';
         if (op.description) html += '<div class="endpoint__desc">' + block(op.description) + '</div>';
 
-        var params = (op.parameters || []).filter(function (p) { return p.in === 'path' || p.in === 'query'; });
+        var params = (op.parameters || []).filter(function (p) { return p.in === 'path' || p.in === 'query' || p.in === 'header' || p.in === 'cookie'; });
         if (params.length) {
             html += '<section class="spec-section"><h2 class="spec-section__title">Parameters</h2>';
             html += params.map(function (p) {
@@ -1227,6 +1227,7 @@
                 var rows = schema ? rowsFromSchema(schema) : '';
                 var example = responseExample(r);
                 var detail = '';
+                var headers = responseHeadersHtml(r);
                 if (rows) {
                     detail = '<div class="response-block__schema">' + rows + '</div>';
                 } else if (example !== undefined) {
@@ -1237,7 +1238,7 @@
                 return '<div class="response-block">' +
                     '<div class="response-row"><span class="status-pill" data-class="' + statusClass(+code) + '">' + esc(code) +
                     '</span><span class="response-row__desc">' + inline(r.description || '') + '</span></div>' +
-                    detail + '</div>';
+                    headers + detail + '</div>';
             }).join('');
             html += '</section>';
         }
@@ -1247,6 +1248,22 @@
         document.getElementById('doc').scrollTop = 0;
         document.getElementById('endpointTry').addEventListener('click', openConsole);
         document.getElementById('endpointLink').addEventListener('click', function () { copyEndpointLink(entry); });
+    }
+
+    function responseHeadersHtml(response) {
+        var headers = response && response.headers ? response.headers : {};
+        var names = Object.keys(headers);
+
+        if (!names.length) return '';
+
+        return '<div class="response-block__headers"><div class="response-block__caption">Headers</div>' +
+            names.map(function (name) {
+                var header = headers[name] || {};
+                var schema = resolveSchema(header.schema) || {};
+                var desc = header.description ? '<div class="row__desc">' + inline(header.description) + '</div>' : '';
+                return '<div class="row"><div class="row__name">' + esc(name) + '</div>' +
+                    '<div class="row__type"><b>' + esc(schemaType(schema)) + '</b></div>' + desc + '</div>';
+            }).join('') + '</div>';
     }
 
     function copyEndpointLink(entry) {
@@ -1337,7 +1354,7 @@
         }
     }
 
-    function queryFieldControl(param) {
+    function parameterFieldControl(param, kind) {
         var schema = resolveSchema(param.schema) || {};
         var typeLbl = schemaType(schema);
 
@@ -1346,9 +1363,9 @@
             var itemType = schema.items ? schemaType(itemSchema) : 'string';
             var ftype = queryInputType(itemSchema);
             var value = inputSample(itemSchema, param.required);
-            var control = '<div class="repeat" data-repeat data-repeat-kind="query" data-name="' + esc(param.name) +
+            var control = '<div class="repeat" data-repeat data-repeat-kind="' + esc(kind) + '" data-name="' + esc(param.name) +
                 '" data-ftype="' + esc(ftype) + '" data-placeholder="' + esc(itemType) + '">' +
-                    '<div class="repeat__items">' + repeatValueRow('query', param.name, ftype, itemType, false, value) + '</div>' +
+                    '<div class="repeat__items">' + repeatValueRow(kind, param.name, ftype, itemType, false, value) + '</div>' +
                     '<button type="button" class="repeat__add" data-repeat-add aria-label="Add ' + esc(param.name) + ' value" title="Add">+</button>' +
                 '</div>';
 
@@ -1356,8 +1373,20 @@
         }
 
         var valueAttr = inputSample(schema, param.required);
-        return field(param.name, '<input class="input" type="text" data-kind="query" data-name="' + esc(param.name) +
+        return field(param.name, '<input class="input" type="text" data-kind="' + esc(kind) + '" data-name="' + esc(param.name) +
             '" data-ftype="text" value="' + esc(valueAttr) + '" placeholder="' + esc(typeLbl) + '">', param.required);
+    }
+
+    function queryFieldControl(param) {
+        return parameterFieldControl(param, 'query');
+    }
+
+    function headerFieldControl(param) {
+        return parameterFieldControl(param, 'header');
+    }
+
+    function cookieFieldControl(param) {
+        return parameterFieldControl(param, 'cookie');
     }
 
     function globalPathFieldControl(name) {
@@ -1436,7 +1465,7 @@
         var form = document.getElementById('consoleForm');
         if (!form) return;
 
-        form.querySelectorAll('[data-kind="path"], [data-kind="query"], [data-kind="body-field"], [data-kind="body-raw"]').forEach(function (control) {
+        form.querySelectorAll('[data-kind="path"], [data-kind="query"], [data-kind="header"], [data-kind="cookie"], [data-kind="body-field"], [data-kind="body-raw"]').forEach(function (control) {
             if (control.type === 'file') {
                 control.value = '';
             } else if (control.tagName === 'SELECT') {
@@ -1456,7 +1485,7 @@
         document.getElementById('responseMount').innerHTML = '';
         updateSnippet();
 
-        var first = form.querySelector('[data-kind="path"], [data-kind="query"], [data-kind="body-field"], [data-kind="body-raw"]');
+        var first = form.querySelector('[data-kind="path"], [data-kind="query"], [data-kind="header"], [data-kind="cookie"], [data-kind="body-field"], [data-kind="body-raw"]');
         if (first) first.focus();
     }
 
@@ -1500,6 +1529,18 @@
         if (queryParams.length) {
             html += '<div class="subhead">Query</div>';
             html += queryParams.map(queryFieldControl).join('');
+        }
+
+        var headerParams = (op.parameters || []).filter(function (p) { return p.in === 'header'; });
+        if (headerParams.length) {
+            html += '<div class="subhead">Headers</div>';
+            html += headerParams.map(headerFieldControl).join('');
+        }
+
+        var cookieParams = (op.parameters || []).filter(function (p) { return p.in === 'cookie'; });
+        if (cookieParams.length) {
+            html += '<div class="subhead">Cookies</div>';
+            html += cookieParams.map(cookieFieldControl).join('');
         }
 
         var content = requestBodyContent(op);
@@ -1630,6 +1671,18 @@
         });
 
         var headers = { Accept: 'application/json' };
+        form.querySelectorAll('[data-kind="header"]').forEach(function (input) {
+            if (input.value === '') return;
+            headers[input.dataset.name] = input.dataset.array === 'true'
+                ? (headers[input.dataset.name] ? headers[input.dataset.name] + ',' : '') + coerce(input.dataset.ftype, input.value)
+                : String(coerce(input.dataset.ftype, input.value));
+        });
+        var cookies = [];
+        form.querySelectorAll('[data-kind="cookie"]').forEach(function (input) {
+            if (input.value === '') return;
+            cookies.push(input.dataset.name + '=' + encodeURIComponent(input.value));
+        });
+        if (cookies.length) headers.Cookie = cookies.join('; ');
         var content = requestBodyContent(entry.op);
         var body = BODY_METHODS[entry.method] ? readBody(form, content) : { mode: 'none' };
         if (body.mode === 'json' || body.mode === 'raw') headers['Content-Type'] = 'application/json';

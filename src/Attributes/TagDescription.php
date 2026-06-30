@@ -6,6 +6,9 @@ namespace Tsitsishvili\Documentator\Attributes;
 
 use Attribute;
 
-/** Excludes the endpoint (or whole controller) from the generated docs. */
+/** Adds a description to the OpenAPI tag used for this endpoint group. */
 #[Attribute(Attribute::TARGET_METHOD | Attribute::TARGET_FUNCTION | Attribute::TARGET_CLASS)]
-final class Hidden {}
+final class TagDescription
+{
+    public function __construct(public string $text) {}
+}

@@ -8,12 +8,14 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Routing\Route;
 use PhpParser\Node;
 use PhpParser\NodeFinder;
+use ReflectionFunctionAbstract;
 use ReflectionMethod;
 use ReflectionNamedType;
 use Throwable;
 use Tsitsishvili\Documentator\Data\EndpointData;
 use Tsitsishvili\Documentator\Data\ResponseData;
 use Tsitsishvili\Documentator\Extraction\ExtractionStrategy;
+use Tsitsishvili\Documentator\Extraction\Support\RouteActionReflection;
 use Tsitsishvili\Documentator\Extraction\Support\SourceAnalyzer;
 
 /**
@@ -27,11 +29,13 @@ final class ExtractInlineResponses implements ExtractionStrategy
 
     public function __invoke(EndpointData $endpoint, Route $route, ?ReflectionMethod $method): EndpointData
     {
-        if ($method === null) {
+        $action = RouteActionReflection::for($route, $method);
+
+        if ($action === null) {
             return $endpoint;
         }
 
-        foreach ($this->responsesFor($method) as $response) {
+        foreach ($this->responsesFor($action) as $response) {
             $endpoint->responses[$response->status] ??= $response;
         }
 
@@ -41,20 +45,26 @@ final class ExtractInlineResponses implements ExtractionStrategy
     /**
      * @return array<int, ResponseData>
      */
-    private function responsesFor(ReflectionMethod $method): array
+    private function responsesFor(ReflectionFunctionAbstract $action): array
     {
-        $methodNode = $this->source->methodNode($method);
+        $functionNode = $this->source->functionLikeNode($action);
 
-        if (! $methodNode instanceof Node\Stmt\ClassMethod) {
+        if ($functionNode === null) {
             return [];
         }
 
         $responses = [];
 
-        $services = $this->serviceVariables($method);
-        $variables = $this->variableSchemas($methodNode, $services);
+        $services = $this->serviceVariables($action);
+        $variables = $functionNode instanceof Node\Expr\ArrowFunction ? [] : $this->variableSchemas($functionNode, $services);
 
-        foreach ((new NodeFinder)->find($methodNode, fn (Node $node) => $node instanceof Node\Stmt\Return_) as $return) {
+        if ($functionNode instanceof Node\Expr\ArrowFunction) {
+            $response = $this->responseFromReturn($functionNode->expr, $variables, $services);
+
+            return $response === null ? [] : [$response];
+        }
+
+        foreach ((new NodeFinder)->find($functionNode, fn (Node $node) => $node instanceof Node\Stmt\Return_) as $return) {
             if (! $return instanceof Node\Stmt\Return_ || ! $return->expr instanceof Node\Expr) {
                 continue;
             }
@@ -450,11 +460,11 @@ final class ExtractInlineResponses implements ExtractionStrategy
     /**
      * @return array<string, class-string>
      */
-    private function serviceVariables(ReflectionMethod $method): array
+    private function serviceVariables(ReflectionFunctionAbstract $action): array
     {
         $services = [];
 
-        foreach ($method->getParameters() as $parameter) {
+        foreach ($action->getParameters() as $parameter) {
             $type = $parameter->getType();
 
             if (! $type instanceof ReflectionNamedType || $type->isBuiltin()) {
@@ -475,15 +485,14 @@ final class ExtractInlineResponses implements ExtractionStrategy
      * @param  array<string, class-string>  $services
      * @return array<string, array<string, mixed>>
      */
-    private function variableSchemas(Node\Stmt\ClassMethod $methodNode, array $services): array
+    private function variableSchemas(Node $functionNode, array $services): array
     {
         $variables = [];
 
-        foreach ((new NodeFinder)->find($methodNode, fn (Node $node) => $node instanceof Node\Expr\Assign) as $assign) {
+        foreach ((new NodeFinder)->find($functionNode, fn (Node $node) => $node instanceof Node\Expr\Assign) as $assign) {
             if (! $assign instanceof Node\Expr\Assign
                 || ! $assign->var instanceof Node\Expr\Variable
-                || ! is_string($assign->var->name)
-                || ! $assign->expr instanceof Node\Expr) {
+                || ! is_string($assign->var->name)) {
                 continue;
             }
 

@@ -22,15 +22,21 @@ final class EndpointData
 
     public ?string $method = null;
 
+    public bool $introspectable = false;
+
     public ?string $routeName = null;
 
     public ?string $summary = null;
 
     public ?string $description = null;
 
+    public ?string $operationId = null;
+
     public ?string $group = null;
 
     public ?string $groupVersion = null;
+
+    public ?string $groupDescription = null;
 
     /** @var array<string, ParameterData> */
     public array $pathParameters = [];
@@ -39,7 +45,18 @@ final class EndpointData
     public array $queryParameters = [];
 
     /** @var array<string, ParameterData> */
+    public array $headerParameters = [];
+
+    /** @var array<string, ParameterData> */
+    public array $cookieParameters = [];
+
+    /** @var array<string, ParameterData> */
     public array $bodyParameters = [];
+
+    public ?string $requestMediaType = null;
+
+    /** @var array<int, array<string, string>> */
+    public array $servers = [];
 
     /** @var array<int, ResponseData> keyed by status code */
     public array $responses = [];
@@ -70,6 +87,10 @@ final class EndpointData
 
     public function operationId(): string
     {
+        if ($this->operationId !== null) {
+            return $this->operationId;
+        }
+
         $versionPrefix = $this->groupVersion !== null
             ? Str::studly($this->groupVersion).'_'
             : '';

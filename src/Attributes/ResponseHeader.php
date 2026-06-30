@@ -6,14 +6,14 @@ namespace Tsitsishvili\Documentator\Attributes;
 
 use Attribute;
 
-/** Documents or overrides a request body field. */
+/** Documents a response header for a specific status code. */
 #[Attribute(Attribute::TARGET_METHOD | Attribute::TARGET_FUNCTION | Attribute::IS_REPEATABLE)]
-final class BodyParam
+final class ResponseHeader
 {
     public function __construct(
+        public int $status,
         public string $name,
         public string $type = 'string',
-        public bool $required = false,
         public ?string $description = null,
         public mixed $example = null,
     ) {}

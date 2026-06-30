@@ -15,9 +15,9 @@ use Tsitsishvili\Documentator\Support\OpenApiValidator;
 
 /**
  * Audits the inferred documentation so CI can catch gaps and drift: endpoints
- * that can't be introspected (closure routes) or document only a bare success
- * response with no schema. With --against it also fails when a committed spec no
- * longer matches what the package would generate.
+ * whose actions can't be introspected or that document only a bare success
+ * response with no schema. With --against it also fails when a committed spec
+ * no longer matches what the package would generate.
  */
 final class CheckCommand extends Command
 {
@@ -102,8 +102,8 @@ final class CheckCommand extends Command
         foreach ($endpoints as $endpoint) {
             $label = strtoupper(implode('|', $endpoint->verbs())).' /'.ltrim($endpoint->uri, '/');
 
-            if ($endpoint->controller === null) {
-                $issues[] = [$label, 'closure route — cannot introspect; move it to a controller method to document it'];
+            if (! $endpoint->introspectable) {
+                $issues[] = [$label, 'route action cannot be introspected; move it to a controller method or closure to document it'];
 
                 continue;
             }
@@ -129,7 +129,7 @@ final class CheckCommand extends Command
     }
 
     /**
-     * @param  array<string, mixed>  $spec
+     * @param  array<string, mixed>  $health
      */
     private function reportHealth(array $health): void
     {

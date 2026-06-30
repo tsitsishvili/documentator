@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Documented headers, cookies and operation metadata.** New `#[HeaderParam]`,
+  `#[CookieParam]`, `#[ResponseHeader]`, `#[OperationId]`, `#[RequestMediaType]`,
+  `#[Server]`, `#[TagDescription]` and `#[SchemaName]` attributes expose more of
+  OpenAPI without custom transformers. The built-in UI now shows documented
+  request headers/cookies, includes them in try-it requests and snippets, and
+  displays documented response headers.
+- **Manual PHPDoc type-string schemas.** Attribute `type` values can now express
+  useful schemas with scalars, nullable unions, `list<T>`, `T[]`,
+  `array<string, T>` and array shapes such as
+  `array{id: int, status?: string}`. `#[Response(type: ...)]` can document a
+  response body without a Resource or example.
+- **Deeper inline request inference.** Literal `Validator::make(..., [...])`
+  rules and request accessors such as `$request->integer('page')`,
+  `$request->boolean('active')`, `$request->query('q')` and `request('q')` are
+  now documented automatically.
+- **Spatie Query Builder inference.** Literal `allowedFilters`,
+  `allowedSorts`, `defaultSort`, `allowedIncludes` and `allowedFields` calls are
+  inferred from source, including local variable arrays, class constants, simple
+  aliases and literal ignored filter values.
+
 ## [1.5.0] - 2026-06-28
 
 ### Added

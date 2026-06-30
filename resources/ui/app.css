@@ -617,6 +617,14 @@ a { color: inherit; }
     border-radius: 8px;
 }
 .response-block:last-child .response-block__schema { margin-bottom: 0; }
+.response-block__headers {
+    margin: 2px 0 12px;
+    padding: 12px 14px 4px;
+    background: color-mix(in srgb, var(--surface-2) 76%, transparent);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+}
+.response-block__headers + .response-block__schema { margin-top: -2px; }
 .response-block__schema .row:last-child { padding-bottom: 13px; }
 .response-block__example { position: relative; padding: 14px 14px 12px; overflow: hidden; }
 .response-block__caption {

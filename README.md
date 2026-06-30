@@ -47,11 +47,12 @@ pipeline enriches the endpoint:
 | Source | Produces |
 | --- | --- |
 | Route definition | verbs, URI, **typed path params** (numeric constraint / bound-model key → `integer`), name, auth guess from `auth` middleware |
-| Controller PHPDoc | **summary** (first line) and **description** (the rest), so written docblocks become docs |
+| Controller/closure PHPDoc | **summary** (first line) and **description** (the rest), so written docblocks become docs |
 | FormRequest `rules()` | parameters with types, required, **enums** (`in:`, `Rule::enum`, `Rule::in`), **formats** (email/uuid/date), bounds (`min`/`max`), `regex`→`pattern`, `digits`→integer, `confirmed`→a `_confirmation` field, nullability, **nested** rules (`items.*.id`), **file uploads** → multipart. On GET/HEAD routes these become **query parameters** instead of a body |
-| Inline `$request->validate([...])` | the same rule parsing for literal inline validation arrays in controller methods |
+| Inline validation / request access | the same rule parsing for literal `$request->validate([...])`, `request()->validate([...])`, `Validator::make(..., [...])` arrays, plus request accessors like `$request->integer('page')`, `$request->boolean('active')`, `$request->query('q')` |
 | spatie/laravel-data | request/response **Data objects** — typed properties, enums, nested Data, collections (optional, auto-detected) |
-| Controller return type / return statement | a success response schema from a Resource's `toArray()`, a `ResourceCollection`, a `Resource::collection($q->paginate())` **return statement** (**paginator envelope** + `page`/`per_page` query params), literal `response()->json([...], 202)` payloads, common Laravel response helpers (`response()`, `view()`, redirects), service methods that return arrays, or an **Eloquent model** (`$casts` + `@property`). Status follows the verb: POST → **201**, DELETE → **204** |
+| spatie/laravel-query-builder | query params from literal `allowedFilters`, `allowedSorts`, `allowedIncludes` and `allowedFields` calls (optional, auto-detected from source; no runtime dependency) |
+| Route action return type / return statement | a success response schema from a Resource's `toArray()`, a `ResourceCollection`, a `Resource::collection($q->paginate())` **return statement** (**paginator envelope** + `page`/`per_page` query params), literal `response()->json([...], 202)` payloads, common Laravel response helpers (`response()`, `view()`, redirects), service methods that return arrays, or an **Eloquent model** (`$casts` + `@property`). Status follows the verb: POST → **201**, DELETE → **204** |
 | Generated examples | a representative `example` for every body/parameter — format- and name-aware (`email`→`user@example.com`, `*_url`, `*_name`, dates, enums, …) so the playground starts filled |
 | PHP attributes | overrides for everything above (runs last) |
 
@@ -89,29 +90,41 @@ public function store(CreateOrderData $data): OrderData
 Attributes always win over inference. Mix and match as needed:
 
 ```php
-use Tsitsishvili\Documentator\Attributes\{Summary, Description, Group, BodyParam, Response, Authenticated};
+use Tsitsishvili\Documentator\Attributes\{Summary, Description, Group, BodyParam, HeaderParam, CookieParam, Response, ResponseHeader, RequestMediaType, OperationId, Server, Authenticated};
 
 #[Group('Orders')]
+#[OperationId('createOrder')]
+#[Server('https://tenant.example.com', description: 'Tenant API')]
 #[Summary('Create an order')]
 #[Description('Creates an order for the authenticated customer.')]
 #[Authenticated]
+#[HeaderParam('X-Tenant', required: true)]
+#[CookieParam('preview_token')]
+#[RequestMediaType('application/vnd.api+json')]
 #[BodyParam('coupon', 'string', required: false, description: 'Optional promo code')]
 #[Response(201, resource: OrderResource::class, description: 'Order created')]
-#[Response(422, description: 'Validation failed')]
+#[ResponseHeader(201, 'X-Request-Id')]
+#[Response(202, description: 'Queued', type: 'array{id: int, status?: string}')]
+#[Response(422, description: 'Validation failed', type: 'array{message: string, errors: array<string, list<string>>}')]
 public function store(StoreOrderRequest $request): OrderResource
 {
     // ...
 }
 ```
 
-Available attributes: `Summary`, `Description`, `Group`, `Authenticated`,
-`Hidden`, `Deprecated`, `BodyParam`, `QueryParam`, `PathParam`, `Response`.
+Available attributes: `Summary`, `Description`, `OperationId`, `Group`,
+`Authenticated`, `Hidden`, `Deprecated`, `BodyParam`, `QueryParam`,
+`HeaderParam`, `CookieParam`, `PathParam`, `RequestMediaType`, `Server`,
+`TagDescription`, `Response`, `ResponseHeader`, `SchemaName`.
 `Group`, `Authenticated`, `Hidden` and `Deprecated` may also be placed on the
 controller class to set a default for all its methods (`#[Deprecated]` also
 honours PHP 8.4's native `#[\Deprecated]`). `#[Response(resource: X, paginated: true)]` (or
 `collection: true`) wraps a resource in the paginator / `{ data: [...] }`
 envelope; add `paginationLinks: false` for a custom collection that drops
-Laravel's `links` blocks.
+Laravel's `links` blocks. `#[Response(type: 'array{id: int}')]` and parameter
+`type` values support a practical PHPDoc subset: scalars, `?T` / `T|null`,
+`list<T>`, `T[]`, `array<string, T>`, and array shapes like
+`array{id: int, name?: string}`.
 
 For versioned APIs, keep the group name stable and put the version on the group:
 
@@ -130,6 +143,8 @@ avoid collisions between versions.
 Put `#[UsesModel(Order::class)]` on a Resource to tell the extractor which
 Eloquent model it wraps (otherwise the model is resolved by naming convention,
 configurable via `models_namespace`), so field types come from the model's casts.
+Use `#[SchemaName('PublicOrder')]` on a Resource or ResourceCollection when you
+want a stable `components.schemas` name instead of the class basename.
 
 ## Authentication
 
@@ -244,8 +259,8 @@ php artisan documentator:postman collection.json    # export a Postman v2.1 coll
 
 ### Keeping docs honest in CI
 
-`documentator:check` audits the generated docs — it flags closure routes (which
-can't be introspected) and endpoints with no documented success schema, and can
+`documentator:check` audits the generated docs — it flags endpoints whose action
+cannot be introspected and endpoints with no documented success schema, and can
 detect drift from a committed spec, listing the specific path / operation /
 response changes. It also prints a documentation health summary (operation
 count, tags, secured operations, missing/generic summaries and generic success

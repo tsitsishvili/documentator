@@ -8,11 +8,14 @@ use BackedEnum;
 use Illuminate\Http\Request;
 use PhpParser\Node;
 use PhpParser\NodeFinder;
-use ReflectionMethod;
+use ReflectionFunctionAbstract;
 use ReflectionNamedType;
+use Tsitsishvili\Documentator\Data\ParameterData;
+use Tsitsishvili\Documentator\OpenApi\SchemaType;
 
 /**
- * Finds literal inline Laravel validation arrays in controller methods.
+ * Finds literal inline Laravel validation arrays in controller methods and
+ * closure route actions.
  * Dynamic rule variables are skipped so documentation generation stays
  * conservative and non-failing.
  */
@@ -23,18 +26,18 @@ final class InlineValidationRulesExtractor
     /**
      * @return array<string, mixed>
      */
-    public function rulesFor(ReflectionMethod $method): array
+    public function rulesFor(ReflectionFunctionAbstract $action): array
     {
-        $methodNode = $this->source->methodNode($method);
+        $functionNode = $this->source->functionLikeNode($action);
 
-        if (! $methodNode instanceof Node\Stmt\ClassMethod) {
+        if ($functionNode === null) {
             return [];
         }
 
-        $requestNames = $this->requestParameterNames($method);
+        $requestNames = $this->requestParameterNames($action);
         $rules = [];
 
-        foreach ((new NodeFinder)->find($methodNode, fn (Node $node) => $node instanceof Node\Expr\MethodCall) as $call) {
+        foreach ((new NodeFinder)->find($functionNode, fn (Node $node) => $node instanceof Node\Expr\MethodCall) as $call) {
             if (! $call instanceof Node\Expr\MethodCall) {
                 continue;
             }
@@ -46,17 +49,99 @@ final class InlineValidationRulesExtractor
             }
         }
 
+        foreach ((new NodeFinder)->find($functionNode, fn (Node $node) => $node instanceof Node\Expr\StaticCall) as $call) {
+            if (! $call instanceof Node\Expr\StaticCall || ! $this->isValidatorMakeCall($call)) {
+                continue;
+            }
+
+            $array = $this->argumentArray($call->args, 1);
+
+            if ($array instanceof Node\Expr\Array_) {
+                $rules = array_replace($rules, $this->rulesFromArray($array));
+            }
+        }
+
         return $rules;
+    }
+
+    /**
+     * @return array<int, array{parameter: ParameterData, location: 'query'|'body'|null}>
+     */
+    public function requestAccessorsFor(ReflectionFunctionAbstract $action): array
+    {
+        $functionNode = $this->source->functionLikeNode($action);
+
+        if ($functionNode === null) {
+            return [];
+        }
+
+        $requestNames = $this->requestParameterNames($action);
+        $parameters = [];
+
+        foreach ((new NodeFinder)->find($functionNode, fn (Node $node) => $node instanceof Node\Expr\MethodCall) as $call) {
+            if (! $call instanceof Node\Expr\MethodCall || ! $call->name instanceof Node\Identifier) {
+                continue;
+            }
+
+            if (! $this->isRequestExpression($call->var, $requestNames)) {
+                continue;
+            }
+
+            $method = strtolower($call->name->toString());
+
+            if (! in_array($method, $this->requestAccessorMethods(), true)) {
+                continue;
+            }
+
+            $name = $this->stringArgument($call->args, 0);
+
+            if ($name === null || $name === '') {
+                continue;
+            }
+
+            $parameters[$method.'|'.$name] = [
+                'parameter' => new ParameterData(
+                    name: $name,
+                    type: SchemaType::fromRequestAccessor($method, $name)->toSchema()['type'],
+                    schema: SchemaType::fromRequestAccessor($method, $name)->toSchema(),
+                ),
+                'location' => $method === 'query' ? 'query' : ($method === 'post' ? 'body' : null),
+            ];
+        }
+
+        foreach ((new NodeFinder)->find($functionNode, fn (Node $node) => $node instanceof Node\Expr\FuncCall) as $call) {
+            if (! $call instanceof Node\Expr\FuncCall || ! $this->isNamedCall($call, 'request')) {
+                continue;
+            }
+
+            $name = $this->stringArgument($call->args, 0);
+
+            if ($name === null || $name === '') {
+                continue;
+            }
+
+            $schema = SchemaType::fromName($name)->toSchema();
+            $parameters['request|'.$name] = [
+                'parameter' => new ParameterData(
+                    name: $name,
+                    type: $schema['type'],
+                    schema: $schema,
+                ),
+                'location' => null,
+            ];
+        }
+
+        return array_values($parameters);
     }
 
     /**
      * @return array<int, string>
      */
-    private function requestParameterNames(ReflectionMethod $method): array
+    private function requestParameterNames(ReflectionFunctionAbstract $action): array
     {
         $names = [];
 
-        foreach ($method->getParameters() as $parameter) {
+        foreach ($action->getParameters() as $parameter) {
             $type = $parameter->getType();
 
             if ($type instanceof ReflectionNamedType && ! $type->isBuiltin()) {
@@ -122,6 +207,16 @@ final class InlineValidationRulesExtractor
     }
 
     /**
+     * @param  array<int, Node\Arg>  $args
+     */
+    private function stringArgument(array $args, int $index): ?string
+    {
+        $value = $args[$index]->value ?? null;
+
+        return $value instanceof Node\Scalar\String_ ? $value->value : null;
+    }
+
+    /**
      * @param  array<int, string>  $requestNames
      */
     private function isRequestExpression(Node\Expr $expr, array $requestNames): bool
@@ -146,6 +241,30 @@ final class InlineValidationRulesExtractor
     private function isNamedCall(Node\Expr\FuncCall $call, string $name): bool
     {
         return $call->name instanceof Node\Name && strtolower($call->name->toString()) === $name;
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function requestAccessorMethods(): array
+    {
+        return [
+            'input',
+            'query',
+            'post',
+            'get',
+            'string',
+            'integer',
+            'int',
+            'float',
+            'double',
+            'boolean',
+            'bool',
+            'array',
+            'collect',
+            'date',
+            'file',
+        ];
     }
 
     /**

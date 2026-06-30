@@ -6,11 +6,13 @@ namespace Tsitsishvili\Documentator\Extraction\Strategies;
 
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Routing\Route;
+use ReflectionFunctionAbstract;
 use ReflectionMethod;
 use ReflectionNamedType;
 use Throwable;
 use Tsitsishvili\Documentator\Data\EndpointData;
 use Tsitsishvili\Documentator\Extraction\ExtractionStrategy;
+use Tsitsishvili\Documentator\Extraction\Support\RouteActionReflection;
 use Tsitsishvili\Documentator\Extraction\Support\RuleParser;
 
 /**
@@ -22,11 +24,13 @@ final class ExtractFormRequestRules implements ExtractionStrategy
 {
     public function __invoke(EndpointData $endpoint, Route $route, ?ReflectionMethod $method): EndpointData
     {
-        if ($method === null) {
+        $action = RouteActionReflection::for($route, $method);
+
+        if ($action === null) {
             return $endpoint;
         }
 
-        $formRequest = $this->findFormRequest($method);
+        $formRequest = $this->findFormRequest($action);
 
         if ($formRequest === null) {
             return $endpoint;
@@ -61,9 +65,9 @@ final class ExtractFormRequestRules implements ExtractionStrategy
         return $endpoint;
     }
 
-    private function findFormRequest(ReflectionMethod $method): ?string
+    private function findFormRequest(ReflectionFunctionAbstract $action): ?string
     {
-        foreach ($method->getParameters() as $parameter) {
+        foreach ($action->getParameters() as $parameter) {
             $type = $parameter->getType();
 
             if (! $type instanceof ReflectionNamedType || $type->isBuiltin()) {

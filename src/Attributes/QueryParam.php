@@ -7,7 +7,7 @@ namespace Tsitsishvili\Documentator\Attributes;
 use Attribute;
 
 /** Documents or overrides a query string parameter. */
-#[Attribute(Attribute::TARGET_METHOD | Attribute::IS_REPEATABLE)]
+#[Attribute(Attribute::TARGET_METHOD | Attribute::TARGET_FUNCTION | Attribute::IS_REPEATABLE)]
 final class QueryParam
 {
     public function __construct(
