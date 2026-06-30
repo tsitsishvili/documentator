@@ -20,6 +20,7 @@ use Tsitsishvili\Documentator\Extraction\Strategies\ExtractInlineResponses;
 use Tsitsishvili\Documentator\Extraction\Strategies\ExtractInlineValidationRules;
 use Tsitsishvili\Documentator\Extraction\Strategies\ExtractResponses;
 use Tsitsishvili\Documentator\Extraction\Strategies\ExtractRouteMetadata;
+use Tsitsishvili\Documentator\Extraction\Strategies\ExtractSpatieQueryBuilder;
 use Tsitsishvili\Documentator\Http\Controllers\AssetController;
 use Tsitsishvili\Documentator\Http\Controllers\DocsController;
 use Tsitsishvili\Documentator\Http\Controllers\OpenApiController;
@@ -50,6 +51,7 @@ final class DocumentatorServiceProvider extends ServiceProvider
                 $app->make(ExtractFormRequestRules::class),
                 $app->make(ExtractInlineValidationRules::class),
                 $app->make(ExtractDataObjects::class),
+                $app->make(ExtractSpatieQueryBuilder::class),
                 $app->make(ExtractResponses::class),
                 $app->make(ExtractInlineResponses::class),
                 $app->make(ExtractErrorResponses::class),

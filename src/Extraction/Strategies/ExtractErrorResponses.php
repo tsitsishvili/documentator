@@ -11,6 +11,7 @@ use PhpParser\Node;
 use PhpParser\NodeFinder;
 use PhpParser\Parser;
 use PhpParser\ParserFactory;
+use ReflectionFunctionAbstract;
 use ReflectionMethod;
 use ReflectionNamedType;
 use Throwable;
@@ -19,6 +20,7 @@ use Tsitsishvili\Documentator\Data\EndpointData;
 use Tsitsishvili\Documentator\Data\ResponseData;
 use Tsitsishvili\Documentator\Extraction\ExtractionStrategy;
 use Tsitsishvili\Documentator\Extraction\Support\InlineValidationRulesExtractor;
+use Tsitsishvili\Documentator\Extraction\Support\RouteActionReflection;
 
 /**
  * Adds the conventional error responses an endpoint can return without anyone
@@ -49,17 +51,19 @@ final class ExtractErrorResponses implements ExtractionStrategy
             return $endpoint;
         }
 
-        if ($endpoint->authenticated || ($method !== null && $this->hasAuthAttribute($method))) {
+        $action = RouteActionReflection::for($route, $method);
+
+        if ($endpoint->authenticated || ($action !== null && $this->hasAuthAttribute($action))) {
             $endpoint->responses[401] ??= $this->messageResponse(401, 'Unauthenticated');
         }
 
-        if ($method === null) {
+        if ($action === null) {
             return $endpoint;
         }
 
-        $formRequest = $this->findFormRequest($method);
+        $formRequest = $this->findFormRequest($action);
 
-        if ($formRequest !== null || $this->inlineValidation->rulesFor($method) !== []) {
+        if ($formRequest !== null || $this->inlineValidation->rulesFor($action) !== []) {
             $endpoint->responses[422] ??= new ResponseData(
                 status: 422,
                 description: 'Validation error',
@@ -73,22 +77,26 @@ final class ExtractErrorResponses implements ExtractionStrategy
             }
         }
 
-        if ($this->bindsModel($endpoint, $method)) {
+        if ($this->bindsModel($endpoint, $action)) {
             $endpoint->responses[404] ??= $this->messageResponse(404, 'Not found');
         }
 
         return $endpoint;
     }
 
-    private function hasAuthAttribute(ReflectionMethod $method): bool
+    private function hasAuthAttribute(ReflectionFunctionAbstract $action): bool
     {
-        return $method->getAttributes(Authenticated::class) !== []
-            || $method->getDeclaringClass()->getAttributes(Authenticated::class) !== [];
+        if ($action->getAttributes(Authenticated::class) !== []) {
+            return true;
+        }
+
+        return $action instanceof ReflectionMethod
+            && $action->getDeclaringClass()->getAttributes(Authenticated::class) !== [];
     }
 
-    private function findFormRequest(ReflectionMethod $method): ?string
+    private function findFormRequest(ReflectionFunctionAbstract $action): ?string
     {
-        foreach ($method->getParameters() as $parameter) {
+        foreach ($action->getParameters() as $parameter) {
             $type = $parameter->getType();
 
             if (! $type instanceof ReflectionNamedType || $type->isBuiltin()) {
@@ -187,9 +195,9 @@ final class ExtractErrorResponses implements ExtractionStrategy
      * Whether a route parameter is resolved through implicit model binding: a
      * controller argument typed as a Model whose name matches a path parameter.
      */
-    private function bindsModel(EndpointData $endpoint, ReflectionMethod $method): bool
+    private function bindsModel(EndpointData $endpoint, ReflectionFunctionAbstract $action): bool
     {
-        foreach ($method->getParameters() as $parameter) {
+        foreach ($action->getParameters() as $parameter) {
             $type = $parameter->getType();
 
             if (! $type instanceof ReflectionNamedType || $type->isBuiltin()) {

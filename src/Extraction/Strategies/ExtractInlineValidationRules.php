@@ -9,6 +9,7 @@ use ReflectionMethod;
 use Tsitsishvili\Documentator\Data\EndpointData;
 use Tsitsishvili\Documentator\Extraction\ExtractionStrategy;
 use Tsitsishvili\Documentator\Extraction\Support\InlineValidationRulesExtractor;
+use Tsitsishvili\Documentator\Extraction\Support\RouteActionReflection;
 use Tsitsishvili\Documentator\Extraction\Support\RuleParser;
 
 /**
@@ -22,13 +23,9 @@ final class ExtractInlineValidationRules implements ExtractionStrategy
 
     public function __invoke(EndpointData $endpoint, Route $route, ?ReflectionMethod $method): EndpointData
     {
-        if ($method === null) {
-            return $endpoint;
-        }
+        $action = RouteActionReflection::for($route, $method);
 
-        $rules = $this->rules->rulesFor($method);
-
-        if ($rules === []) {
+        if ($action === null) {
             return $endpoint;
         }
 
@@ -37,8 +34,21 @@ final class ExtractInlineValidationRules implements ExtractionStrategy
         $verbs = $endpoint->verbs();
         $readOnly = $verbs !== [] && array_diff($verbs, ['get', 'head']) === [];
 
+        $rules = $this->rules->rulesFor($action);
+
         foreach (RuleParser::parse($rules) as $param) {
             if ($readOnly) {
+                $endpoint->queryParameters[$param->name] ??= $param;
+            } else {
+                $endpoint->bodyParameters[$param->name] ??= $param;
+            }
+        }
+
+        foreach ($this->rules->requestAccessorsFor($action) as $accessor) {
+            $param = $accessor['parameter'];
+            $location = $accessor['location'] ?? null;
+
+            if ($location === 'query' || ($location === null && $readOnly)) {
                 $endpoint->queryParameters[$param->name] ??= $param;
             } else {
                 $endpoint->bodyParameters[$param->name] ??= $param;

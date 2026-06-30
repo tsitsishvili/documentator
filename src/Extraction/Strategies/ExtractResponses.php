@@ -12,12 +12,15 @@ use Illuminate\Routing\Route;
 use PhpParser\Node;
 use PhpParser\NodeFinder;
 use ReflectionClass;
+use ReflectionFunctionAbstract;
 use ReflectionMethod;
 use ReflectionNamedType;
 use Throwable;
+use Tsitsishvili\Documentator\Attributes\SchemaName;
 use Tsitsishvili\Documentator\Data\EndpointData;
 use Tsitsishvili\Documentator\Data\ResponseData;
 use Tsitsishvili\Documentator\Extraction\ExtractionStrategy;
+use Tsitsishvili\Documentator\Extraction\Support\RouteActionReflection;
 use Tsitsishvili\Documentator\Extraction\Support\SourceAnalyzer;
 use Tsitsishvili\Documentator\OpenApi\PaginationSchema;
 use Tsitsishvili\Documentator\OpenApi\ResourceSchemaExtractor;
@@ -37,7 +40,9 @@ final class ExtractResponses implements ExtractionStrategy
 
     public function __invoke(EndpointData $endpoint, Route $route, ?ReflectionMethod $method): EndpointData
     {
-        if ($method === null) {
+        $action = RouteActionReflection::for($route, $method);
+
+        if ($action === null) {
             return $endpoint;
         }
 
@@ -45,7 +50,7 @@ final class ExtractResponses implements ExtractionStrategy
         // (POST -> 201); a 204 is reserved for the empty-body fallback.
         $status = in_array('post', $endpoint->verbs(), true) && $this->infersStatus() ? 201 : 200;
 
-        if (($collection = $this->resourceCollectionCall($method)) !== null) {
+        if (($collection = $this->resourceCollectionCall($action)) !== null) {
             $resource = $collection['resource'];
             $paginated = $collection['paginated'];
             $endpoint->responses[$status] ??= new ResponseData(
@@ -55,6 +60,7 @@ final class ExtractResponses implements ExtractionStrategy
                 schema: $paginated
                     ? PaginationSchema::paginated($this->schemas->extract($resource), null)
                     : PaginationSchema::collection($this->schemas->extract($resource)),
+                schemaName: $this->schemaName($resource),
             );
 
             if ($paginated) {
@@ -64,7 +70,7 @@ final class ExtractResponses implements ExtractionStrategy
             }
         }
 
-        $returnType = $method->getReturnType();
+        $returnType = $action->getReturnType();
 
         if (! $returnType instanceof ReflectionNamedType || $returnType->isBuiltin()) {
             return $endpoint;
@@ -83,6 +89,7 @@ final class ExtractResponses implements ExtractionStrategy
                 resource: $class,
                 schema: PaginationSchema::paginated($this->collectsSchema($class), $class),
                 collection: $class,
+                schemaName: $this->schemaName($class),
             );
 
             foreach (PaginationSchema::queryParameters() as $name => $param) {
@@ -94,6 +101,7 @@ final class ExtractResponses implements ExtractionStrategy
                 description: $this->describe($status),
                 resource: $class,
                 schema: $this->schemas->extract($class),
+                schemaName: $this->schemaName($class),
             );
         } elseif (is_subclass_of($class, Model::class)) {
             $endpoint->responses[$status] ??= new ResponseData(
@@ -119,9 +127,9 @@ final class ExtractResponses implements ExtractionStrategy
     /**
      * @return array{resource: class-string<JsonResource>, paginated: bool}|null
      */
-    private function resourceCollectionCall(ReflectionMethod $method): ?array
+    private function resourceCollectionCall(ReflectionFunctionAbstract $action): ?array
     {
-        $return = $this->returnExpression($method);
+        $return = $this->returnExpression($action);
 
         if (! $return instanceof Node\Expr\StaticCall
             || ! $return->class instanceof Node\Name
@@ -142,9 +150,9 @@ final class ExtractResponses implements ExtractionStrategy
         ];
     }
 
-    private function returnExpression(ReflectionMethod $method): ?Node\Expr
+    private function returnExpression(ReflectionFunctionAbstract $action): ?Node\Expr
     {
-        return $this->source->firstReturnExpression($method);
+        return $this->source->firstReturnExpression($action);
     }
 
     private function containsPaginatorCall(Node\Expr $expr): bool
@@ -173,5 +181,18 @@ final class ExtractResponses implements ExtractionStrategy
         return is_string($collects) && is_subclass_of($collects, JsonResource::class)
             ? $this->schemas->extract($collects)
             : ['type' => 'object'];
+    }
+
+    private function schemaName(string $class): ?string
+    {
+        try {
+            foreach ((new ReflectionClass($class))->getAttributes(SchemaName::class) as $attribute) {
+                return $attribute->newInstance()->name;
+            }
+        } catch (Throwable) {
+            return null;
+        }
+
+        return null;
     }
 }

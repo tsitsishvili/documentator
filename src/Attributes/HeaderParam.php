@@ -6,9 +6,9 @@ namespace Tsitsishvili\Documentator\Attributes;
 
 use Attribute;
 
-/** Documents or overrides a request body field. */
+/** Documents or overrides a request header parameter. */
 #[Attribute(Attribute::TARGET_METHOD | Attribute::TARGET_FUNCTION | Attribute::IS_REPEATABLE)]
-final class BodyParam
+final class HeaderParam
 {
     public function __construct(
         public string $name,

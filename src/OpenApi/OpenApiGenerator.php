@@ -42,7 +42,11 @@ final class OpenApiGenerator
         foreach ($endpoints as $endpoint) {
             $path = $this->normalizePath($endpoint->uri);
             $tag = $this->tagFor($endpoint);
-            $tags[$this->tagKey($tag, $endpoint->groupVersion)] ??= $this->tag($tag, $endpoint->groupVersion);
+            $tagKey = $this->tagKey($tag, $endpoint->groupVersion);
+            $tags[$tagKey] ??= $this->tag($tag, $endpoint->groupVersion, $endpoint->groupDescription);
+            if ($endpoint->groupDescription !== null && ! isset($tags[$tagKey]['description'])) {
+                $tags[$tagKey]['description'] = $endpoint->groupDescription;
+            }
 
             foreach ($endpoint->verbs() as $verb) {
                 $paths[$path][$verb] = $this->operation($endpoint, $tag, $globalScheme);
@@ -137,6 +141,7 @@ final class OpenApiGenerator
             'parameters' => $this->parameters($endpoint),
             'requestBody' => $this->requestBody($endpoint),
             'responses' => $this->responses($endpoint),
+            'servers' => $endpoint->servers,
             'deprecated' => $endpoint->deprecated ?: null,
             'x-documentator-section' => $this->sectionFor($endpoint),
             'x-documentator-group-version' => $endpoint->groupVersion,
@@ -167,6 +172,14 @@ final class OpenApiGenerator
 
         foreach ($endpoint->queryParameters as $param) {
             $parameters[] = $this->parameter($param, 'query', $param->required);
+        }
+
+        foreach ($endpoint->headerParameters as $param) {
+            $parameters[] = $this->parameter($param, 'header', $param->required);
+        }
+
+        foreach ($endpoint->cookieParameters as $param) {
+            $parameters[] = $this->parameter($param, 'cookie', $param->required);
         }
 
         return $parameters;
@@ -226,9 +239,9 @@ final class OpenApiGenerator
             $schema['required'] = $required;
         }
 
-        $mediaType = RuleParser::hasUpload(array_values($endpoint->bodyParameters))
+        $mediaType = $endpoint->requestMediaType ?? (RuleParser::hasUpload(array_values($endpoint->bodyParameters))
             ? 'multipart/form-data'
-            : 'application/json';
+            : 'application/json');
 
         $content = ['schema' => $schema];
 
@@ -316,8 +329,22 @@ final class OpenApiGenerator
             $body['content'] = [$mediaType => ['example' => $response->example]];
         } elseif ($response->schema !== null) {
             $body['content'] = [$mediaType => ['schema' => $this->responseSchema($response)]];
+        } elseif ($response->type !== null && ($typeSchema = TypeStringParser::parse($response->type)) !== null) {
+            $body['content'] = [$mediaType => ['schema' => $this->normalizeSchema($typeSchema)]];
         } elseif ($response->resource !== null) {
             $body['content'] = [$mediaType => ['schema' => ['type' => 'object']]];
+        }
+
+        if ($response->headers !== []) {
+            $body['headers'] = [];
+
+            foreach ($response->headers as $header) {
+                $body['headers'][$header->name] = array_filter([
+                    'description' => $header->description,
+                    'schema' => $this->schema($header),
+                    'example' => $header->example,
+                ], fn ($value) => $value !== null);
+            }
         }
 
         return $body;
@@ -351,7 +378,7 @@ final class OpenApiGenerator
     {
         $key = $this->componentKey($response);
 
-        if ($key === null || ($this->componentCounts[$key] ?? 0) < 2) {
+        if ($key === null || ($response->schemaName === null && ($this->componentCounts[$key] ?? 0) < 2)) {
             return $this->normalizeSchema($response->schema ?? ['type' => 'object']);
         }
 
@@ -363,6 +390,10 @@ final class OpenApiGenerator
 
     private function componentKey(ResponseData $response): ?string
     {
+        if ($response->schemaName !== null && $response->schema !== null) {
+            return $response->schemaName.'|'.$this->schemaKind($response->schema).'|'.md5(json_encode($response->schema) ?: '');
+        }
+
         if ($response->resource === null || $response->schema === null) {
             return null;
         }
@@ -390,7 +421,7 @@ final class OpenApiGenerator
             return $this->componentNames[$key];
         }
 
-        $base = Str::studly(class_basename((string) $response->resource));
+        $base = $response->schemaName ?? Str::studly(class_basename((string) $response->resource));
         $kind = $this->schemaKind($response->schema ?? []);
         $name = $base.($kind === 'Resource' ? '' : $kind);
 
@@ -415,9 +446,9 @@ final class OpenApiGenerator
             return $this->normalizeSchema($schema);
         }
 
-        $schema = ['type' => $param->type];
+        $schema = TypeStringParser::parse($param->type) ?? ['type' => $param->type];
 
-        if ($param->type === 'array') {
+        if (($schema['type'] ?? null) === 'array' && ! isset($schema['items'])) {
             $schema['items'] = ['type' => 'string'];
         }
 
@@ -657,10 +688,11 @@ final class OpenApiGenerator
     /**
      * @return array<string, string>
      */
-    private function tag(string $name, ?string $version): array
+    private function tag(string $name, ?string $version, ?string $description = null): array
     {
         return array_filter([
             'name' => $name,
+            'description' => $description,
             'x-documentator-version' => $version,
         ], fn ($value) => $value !== null);
     }

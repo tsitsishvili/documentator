@@ -5,11 +5,13 @@ declare(strict_types=1);
 namespace Tsitsishvili\Documentator\Extraction\Strategies;
 
 use Illuminate\Routing\Route;
+use ReflectionFunctionAbstract;
 use ReflectionMethod;
 use ReflectionNamedType;
 use Tsitsishvili\Documentator\Data\EndpointData;
 use Tsitsishvili\Documentator\Data\ResponseData;
 use Tsitsishvili\Documentator\Extraction\ExtractionStrategy;
+use Tsitsishvili\Documentator\Extraction\Support\RouteActionReflection;
 use Tsitsishvili\Documentator\OpenApi\DataObjectSchema;
 
 /**
@@ -25,19 +27,21 @@ final class ExtractDataObjects implements ExtractionStrategy
 
     public function __invoke(EndpointData $endpoint, Route $route, ?ReflectionMethod $method): EndpointData
     {
-        if ($method === null || ! class_exists(DataObjectSchema::DATA_CLASS)) {
+        $action = RouteActionReflection::for($route, $method);
+
+        if ($action === null || ! class_exists(DataObjectSchema::DATA_CLASS)) {
             return $endpoint;
         }
 
-        $this->request($endpoint, $method);
-        $this->response($endpoint, $method);
+        $this->request($endpoint, $action);
+        $this->response($endpoint, $action);
 
         return $endpoint;
     }
 
-    private function request(EndpointData $endpoint, ReflectionMethod $method): void
+    private function request(EndpointData $endpoint, ReflectionFunctionAbstract $action): void
     {
-        $dataClass = $this->findData($method);
+        $dataClass = $this->findData($action);
 
         if ($dataClass === null) {
             return;
@@ -55,9 +59,9 @@ final class ExtractDataObjects implements ExtractionStrategy
         }
     }
 
-    private function response(EndpointData $endpoint, ReflectionMethod $method): void
+    private function response(EndpointData $endpoint, ReflectionFunctionAbstract $action): void
     {
-        $returnType = $method->getReturnType();
+        $returnType = $action->getReturnType();
 
         if (! $returnType instanceof ReflectionNamedType
             || $returnType->isBuiltin()
@@ -76,9 +80,9 @@ final class ExtractDataObjects implements ExtractionStrategy
         );
     }
 
-    private function findData(ReflectionMethod $method): ?string
+    private function findData(ReflectionFunctionAbstract $action): ?string
     {
-        foreach ($method->getParameters() as $parameter) {
+        foreach ($action->getParameters() as $parameter) {
             $type = $parameter->getType();
 
             if (! $type instanceof ReflectionNamedType || $type->isBuiltin()) {

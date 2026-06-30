@@ -13,13 +13,14 @@ use Attribute;
  * `paginated` for the full `{ data, links, meta }` paginator shape. Set
  * `paginationLinks: false` when a custom collection drops Laravel's link blocks.
  */
-#[Attribute(Attribute::TARGET_METHOD | Attribute::IS_REPEATABLE)]
+#[Attribute(Attribute::TARGET_METHOD | Attribute::TARGET_FUNCTION | Attribute::IS_REPEATABLE)]
 final class Response
 {
     public function __construct(
         public int $status = 200,
         public ?string $resource = null,
         public ?string $description = null,
+        public ?string $type = null,
         public mixed $example = null,
         public bool $collection = false,
         public bool $paginated = false,

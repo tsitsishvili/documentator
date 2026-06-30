@@ -10,6 +10,8 @@ use PhpParser\NodeTraverser;
 use PhpParser\NodeVisitor\NameResolver;
 use PhpParser\Parser;
 use PhpParser\ParserFactory;
+use ReflectionFunction;
+use ReflectionFunctionAbstract;
 use ReflectionMethod;
 use Throwable;
 
@@ -71,16 +73,56 @@ final class SourceAnalyzer
         return $node instanceof Node\Stmt\ClassMethod ? $node : null;
     }
 
-    public function firstReturnExpression(ReflectionMethod $method): ?Node\Expr
+    public function functionLikeNode(ReflectionFunctionAbstract $function): Node\Stmt\ClassMethod|Node\Expr\Closure|Node\Expr\ArrowFunction|null
     {
-        $methodNode = $this->methodNode($method);
+        if ($function instanceof ReflectionMethod) {
+            return $this->methodNode($function);
+        }
 
-        if ($methodNode === null) {
+        if (! $function instanceof ReflectionFunction) {
             return null;
         }
 
+        $file = $function->getFileName();
+        $ast = is_string($file) ? $this->astForFile($file) : null;
+
+        if ($ast === null) {
+            return null;
+        }
+
+        $startLine = $function->getStartLine();
+        $endLine = $function->getEndLine();
+        $candidates = (new NodeFinder)->find(
+            $ast,
+            fn (Node $node) => ($node instanceof Node\Expr\Closure || $node instanceof Node\Expr\ArrowFunction)
+                && $node->getStartLine() <= $startLine
+                && $node->getEndLine() >= $endLine,
+        );
+
+        usort(
+            $candidates,
+            fn (Node $a, Node $b) => ($a->getEndLine() - $a->getStartLine()) <=> ($b->getEndLine() - $b->getStartLine()),
+        );
+
+        $node = $candidates[0] ?? null;
+
+        return $node instanceof Node\Expr\Closure || $node instanceof Node\Expr\ArrowFunction ? $node : null;
+    }
+
+    public function firstReturnExpression(ReflectionFunctionAbstract $function): ?Node\Expr
+    {
+        $functionNode = $this->functionLikeNode($function);
+
+        if ($functionNode === null) {
+            return null;
+        }
+
+        if ($functionNode instanceof Node\Expr\ArrowFunction) {
+            return $functionNode->expr;
+        }
+
         $return = (new NodeFinder)->findFirst(
-            $methodNode,
+            $functionNode,
             fn (Node $node) => $node instanceof Node\Stmt\Return_ && $node->expr instanceof Node\Expr,
         );
 

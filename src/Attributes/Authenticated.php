@@ -10,7 +10,7 @@ use Attribute;
  * Marks the endpoint (or whole controller) as requiring authentication. The
  * `scheme` references a key in config('documentator.security').
  */
-#[Attribute(Attribute::TARGET_METHOD | Attribute::TARGET_CLASS)]
+#[Attribute(Attribute::TARGET_METHOD | Attribute::TARGET_FUNCTION | Attribute::TARGET_CLASS)]
 final class Authenticated
 {
     public function __construct(public string $scheme = 'default') {}

@@ -11,7 +11,8 @@ use Tsitsishvili\Documentator\Data\EndpointData;
 /**
  * One step of the extraction pipeline. Each strategy receives the accumulated
  * EndpointData and returns it enriched. The controller's ReflectionMethod is
- * provided when the route resolves to one (null for closure routes).
+ * provided for controller routes; strategies can inspect the Route itself for
+ * closure actions.
  */
 interface ExtractionStrategy
 {

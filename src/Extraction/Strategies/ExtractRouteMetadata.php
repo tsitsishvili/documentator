@@ -7,12 +7,14 @@ namespace Tsitsishvili\Documentator\Extraction\Strategies;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Routing\Route;
 use Illuminate\Support\Str;
+use ReflectionFunctionAbstract;
 use ReflectionMethod;
 use ReflectionNamedType;
 use Throwable;
 use Tsitsishvili\Documentator\Data\EndpointData;
 use Tsitsishvili\Documentator\Data\ParameterData;
 use Tsitsishvili\Documentator\Extraction\ExtractionStrategy;
+use Tsitsishvili\Documentator\Extraction\Support\RouteActionReflection;
 
 /**
  * Seeds the endpoint from the route itself: verbs, URI, name, controller, path
@@ -25,12 +27,19 @@ final class ExtractRouteMetadata implements ExtractionStrategy
         $endpoint->httpMethods = $route->methods();
         $endpoint->uri = $route->uri();
         $endpoint->routeName = $route->getName();
+        $action = RouteActionReflection::for($route, $method);
+        $endpoint->introspectable = $action !== null;
 
         if ($method !== null) {
             $endpoint->controller = $method->class;
             $endpoint->method = $method->name;
             $endpoint->summary = Str::headline($method->name);
-            $this->applyDocblock($endpoint, $method);
+        } elseif ($action !== null) {
+            $endpoint->summary = $this->closureSummary($route);
+        }
+
+        if ($action !== null) {
+            $this->applyDocblock($endpoint, $action);
         }
 
         foreach ($this->pathParameters($route->uri()) as $name => $required) {
@@ -66,15 +75,15 @@ final class ExtractRouteMetadata implements ExtractionStrategy
     }
 
     /**
-     * Pull a human summary + markdown description from the controller method's
-     * PHPDoc: the first paragraph becomes the summary, the rest the description.
+     * Pull a human summary + markdown description from the route action's PHPDoc:
+     * the first paragraph becomes the summary, the rest the description.
      * `@tag` lines and the comment markers are stripped. Either may be overridden
      * later by #[Summary] / #[Description]. A docblock that is only annotations
      * (no prose) leaves the headline summary untouched.
      */
-    private function applyDocblock(EndpointData $endpoint, ReflectionMethod $method): void
+    private function applyDocblock(EndpointData $endpoint, ReflectionFunctionAbstract $action): void
     {
-        $doc = $method->getDocComment();
+        $doc = $action->getDocComment();
 
         if ($doc === false) {
             return;
@@ -147,13 +156,14 @@ final class ExtractRouteMetadata implements ExtractionStrategy
      */
     private function pathParameterType(string $name, Route $route, ?ReflectionMethod $method): string
     {
+        $action = RouteActionReflection::for($route, $method);
         $pattern = $route->wheres[$name] ?? null;
 
         if (is_string($pattern) && in_array(trim($pattern, '^$'), ['[0-9]+', '\d+', '[1-9][0-9]*'], true)) {
             return 'integer';
         }
 
-        if ($method !== null && ($bound = $this->boundModelKeyType($name, $route, $method)) !== null) {
+        if ($action !== null && ($bound = $this->boundModelKeyType($name, $route, $action)) !== null) {
             return $bound;
         }
 
@@ -190,9 +200,9 @@ final class ExtractRouteMetadata implements ExtractionStrategy
      * `string` for a custom field (`{post:slug}`, a uuid route key). Null when the
      * parameter isn't a model binding so the caller can fall back to its heuristic.
      */
-    private function boundModelKeyType(string $name, Route $route, ReflectionMethod $method): ?string
+    private function boundModelKeyType(string $name, Route $route, ReflectionFunctionAbstract $action): ?string
     {
-        foreach ($method->getParameters() as $parameter) {
+        foreach ($action->getParameters() as $parameter) {
             if ($parameter->getName() !== $name) {
                 continue;
             }
@@ -220,6 +230,22 @@ final class ExtractRouteMetadata implements ExtractionStrategy
         return null;
     }
 
+    private function closureSummary(Route $route): string
+    {
+        $name = $route->getName();
+
+        if (is_string($name) && $name !== '') {
+            return Str::headline(Str::afterLast($name, '.'));
+        }
+
+        $segments = array_values(array_filter(
+            explode('/', trim($route->uri(), '/')),
+            fn (string $segment) => ! str_starts_with($segment, '{'),
+        ));
+
+        return Str::headline(end($segments) ?: implode(' ', $route->methods()));
+    }
+
     private function authScheme(Route $route): ?string
     {
         foreach ($route->gatherMiddleware() as $middleware) {
@@ -245,7 +271,7 @@ final class ExtractRouteMetadata implements ExtractionStrategy
                 $scheme = true;
             }
 
-            if (! is_string($pattern) || ! $this->middlewareMatches($middleware, $pattern)) {
+            if (! $this->middlewareMatches($middleware, $pattern)) {
                 continue;
             }
 

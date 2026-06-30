@@ -10,7 +10,7 @@ use Tsitsishvili\Documentator\Documentator;
 
 /*
  * Fixtures: real controllers/requests/models exercising the conventional error
- * responses inferred from an endpoint's shape (closure routes skip reflection).
+ * responses inferred from an endpoint's shape.
  */
 class ErrorThing extends Model {}
 

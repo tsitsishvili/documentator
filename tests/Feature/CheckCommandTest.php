@@ -40,12 +40,19 @@ it('passes when every endpoint is well documented', function () {
         ->assertExitCode(0);
 });
 
-it('flags a closure route and a missing success schema', function () {
+it('passes when a closure route has an inferred success schema', function () {
+    Route::get('api/closure', fn (): CheckedResource => new CheckedResource((object) ['id' => 1]));
+
+    $this->artisan('documentator:check')
+        ->expectsOutputToContain('No documentation issues found.')
+        ->assertExitCode(0);
+});
+
+it('flags routes missing success schemas', function () {
     Route::get('api/closure', fn () => 'x');
     Route::get('api/raw', [CheckedController::class, 'raw']);
 
     $this->artisan('documentator:check')
-        ->expectsOutputToContain('closure route')
         ->expectsOutputToContain('no success response schema')
         ->assertExitCode(0); // reports, but does not fail without --strict
 });
@@ -93,7 +100,7 @@ it('emits dashboard-friendly json', function () {
 
     expect($exit)->toBe(1)
         ->and($payload['ok'])->toBeFalse()
-        ->and($payload['issues'][0]['message'])->toContain('closure route')
+        ->and($payload['issues'][0]['message'])->toContain('no success response schema')
         ->and($payload['health']['operations'])->toBe(2)
         ->and($payload)->toHaveKeys(['validation_errors', 'drift', 'hidden_suggestions']);
 });
