@@ -49,9 +49,9 @@ pipeline enriches the endpoint:
 | Route definition | verbs, URI, **typed path params** (numeric constraint / bound-model key → `integer`), name, auth guess from `auth` middleware |
 | Controller/closure PHPDoc | **summary** (first line) and **description** (the rest), so written docblocks become docs |
 | FormRequest `rules()` | parameters with types, required, **enums** (`in:`, `Rule::enum`, `Rule::in`), **formats** (email/uuid/date), bounds (`min`/`max`), `regex`→`pattern`, `digits`→integer, `confirmed`→a `_confirmation` field, nullability, **nested** rules (`items.*.id`), **file uploads** → multipart. On GET/HEAD routes these become **query parameters** instead of a body |
-| Inline validation / request access | the same rule parsing for literal `$request->validate([...])`, `request()->validate([...])`, `Validator::make(..., [...])` arrays, plus request accessors like `$request->integer('page')`, `$request->boolean('active')`, `$request->query('q')`. Local PHPDoc tags can refine inline params: `@var`, `@example`, `@default`, `@query`, `@body`, `@ignoreParam` |
+| Inline validation / request access | the same rule parsing for literal `$request->validate([...])`, `request()->validate([...])`, `Validator::make(..., [...])` arrays, plus request accessors like `$request->integer('page')`, `$request->boolean('active')`, `$request->query('q')`, and `request('q')`. Validation rules understand escaped dots, `exists`, inline `Rule::exists`, and `Rule::when`. Local PHPDoc tags can refine inline params: `@var`, `@example`, `@default`, `@query`, `@body`, `@ignoreParam` |
 | spatie/laravel-data | request/response **Data objects** — typed properties, enums, nested Data, collections (optional, auto-detected) |
-| spatie/laravel-query-builder | query params from literal `allowedFilters`, `allowedSorts`, `allowedIncludes` and `allowedFields` calls, including simple helper methods and custom `*QueryBuilder` subclasses (optional, auto-detected from source; no runtime dependency) |
+| spatie/laravel-query-builder | query params from literal `allowedFilters`, `allowedSorts`, `defaultSort`, `allowedIncludes` and `allowedFields` calls, including simple helper methods, ignored filter values, and custom `*QueryBuilder` subclasses (optional, auto-detected from source; no runtime dependency) |
 | Laravel Actions | `rules()` on action classes and `handle()` return types for routes pointing at `asController()` (optional, auto-detected; no runtime dependency on the package) |
 | Route action return type / return statement | a success response schema from a Resource's `toArray()`, Laravel 13 `JsonApiResource` (`application/vnd.api+json`, `include`, `fields[type]`), a `ResourceCollection`, a `Resource::collection($q->paginate())` **return statement** (**paginator envelope** + `page`/`per_page` query params), `jsonPaginate()` (`page[number]` / `page[size]`), literal `response()->json([...], 202)` payloads, common Laravel response helpers (`response()`, `view()`, redirects), service methods that return arrays, or an **Eloquent model** (`$casts` + `@property`). Status follows the verb: POST → **201**, DELETE → **204** |
 | Generated examples | a representative `example` for every body/parameter — format- and name-aware (`email`→`user@example.com`, `*_url`, `*_name`, dates, enums, …) so the playground starts filled |
@@ -197,10 +197,11 @@ authenticated opt out automatically and stay public.
 
 ## Trying requests
 
-The built-in explorer can call your API live. It remembers the auth token and
-selected server across endpoints, deep-links each endpoint (`#get-api-orders`)
-for sharing and reload — the **Link** button copies that deep link — renders
-Markdown in descriptions, and shows a copyable request snippet in **cURL, PHP
+The built-in explorer can call your API live, including documented headers and
+cookies. It remembers the auth token and selected server across endpoints,
+deep-links each endpoint (`#get-api-orders`) for sharing and reload — the
+**Link** button copies that deep link — renders Markdown in descriptions, shows
+documented response headers, and shows a copyable request snippet in **cURL, PHP
 (Laravel `Http`), JavaScript (`fetch`), TypeScript, Python (`requests`), Go,
 Ruby, Java, C# and HTTPie** — cURL, PHP, JS and TypeScript as tabs with the rest
 under an **Other** dropdown, and the chosen language is remembered too. The
