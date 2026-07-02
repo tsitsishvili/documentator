@@ -7,6 +7,8 @@ namespace Tsitsishvili\Documentator\OpenApi;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Resources\Json\JsonResource;
 use Illuminate\Http\Resources\Json\ResourceCollection;
+use Illuminate\Http\Resources\JsonApi\JsonApiResource;
+use Illuminate\Support\Str;
 use PhpParser\Node;
 use PhpParser\Node\Expr\Cast;
 use PhpParser\Node\Scalar;
@@ -60,6 +62,10 @@ final class ResourceSchemaExtractor
     {
         if ($depth > self::MAX_DEPTH || ! is_subclass_of($resourceClass, JsonResource::class)) {
             return self::OBJECT;
+        }
+
+        if ($this->isJsonApiResource($resourceClass)) {
+            return $this->jsonApiSchema($resourceClass, $depth);
         }
 
         $method = new ReflectionMethod($resourceClass, 'toArray');
@@ -119,6 +125,55 @@ final class ResourceSchemaExtractor
         return $properties === [] ? self::OBJECT : ['type' => 'object', 'properties' => $properties];
     }
 
+    public function isJsonApiResource(string $resourceClass): bool
+    {
+        return class_exists(JsonApiResource::class) && is_subclass_of($resourceClass, JsonApiResource::class);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public function jsonApiCollection(string $resourceClass, bool $paginated = false): array
+    {
+        $resourceObject = $this->jsonApiResourceObject($resourceClass, 0);
+        $schema = [
+            'type' => 'object',
+            'properties' => [
+                'data' => ['type' => 'array', 'items' => $resourceObject],
+            ],
+        ];
+
+        if ($paginated) {
+            $schema['properties']['links'] = [
+                'type' => 'object',
+                'properties' => [
+                    'first' => ['type' => 'string', 'nullable' => true],
+                    'last' => ['type' => 'string', 'nullable' => true],
+                    'prev' => ['type' => 'string', 'nullable' => true],
+                    'next' => ['type' => 'string', 'nullable' => true],
+                ],
+            ];
+            $schema['properties']['meta'] = [
+                'type' => 'object',
+                'properties' => [
+                    'current_page' => ['type' => 'integer'],
+                    'from' => ['type' => 'integer', 'nullable' => true],
+                    'last_page' => ['type' => 'integer'],
+                    'per_page' => ['type' => 'integer'],
+                    'to' => ['type' => 'integer', 'nullable' => true],
+                    'total' => ['type' => 'integer'],
+                ],
+            ];
+        }
+
+        return $schema;
+    }
+
+    public function jsonApiTypeName(string $resourceClass): string
+    {
+        return $this->jsonApiType($resourceClass);
+    }
+
     /**
      * @return array<string, array<string, mixed>>
      */
@@ -155,6 +210,208 @@ final class ResourceSchemaExtractor
         }
 
         return $properties;
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function jsonApiSchema(string $resourceClass, int $depth): array
+    {
+        return [
+            'type' => 'object',
+            'properties' => [
+                'data' => $this->jsonApiResourceObject($resourceClass, $depth),
+            ],
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function jsonApiResourceObject(string $resourceClass, int $depth): array
+    {
+        $properties = [
+            'id' => ['type' => 'string'],
+            'type' => ['type' => 'string', 'enum' => [$this->jsonApiType($resourceClass)]],
+        ];
+
+        $attributes = $this->jsonApiAttributes($resourceClass, $depth);
+
+        if ($attributes !== []) {
+            $properties['attributes'] = ['type' => 'object', 'properties' => $attributes];
+        }
+
+        $relationships = $this->jsonApiRelationships($resourceClass);
+
+        if ($relationships !== []) {
+            $properties['relationships'] = ['type' => 'object', 'properties' => $relationships];
+        }
+
+        foreach (['toLinks' => 'links', 'toMeta' => 'meta'] as $method => $name) {
+            $schema = $this->methodProperties($resourceClass, $method, $depth);
+
+            if ($schema !== []) {
+                $properties[$name] = ['type' => 'object', 'properties' => $schema];
+            }
+        }
+
+        return ['type' => 'object', 'properties' => $properties];
+    }
+
+    /**
+     * @return array<string, array<string, mixed>>
+     */
+    private function jsonApiAttributes(string $resourceClass, int $depth): array
+    {
+        $properties = $this->methodProperties($resourceClass, 'toAttributes', $depth);
+
+        if ($properties !== []) {
+            return $properties;
+        }
+
+        try {
+            $attributes = (new ReflectionClass($resourceClass))->getDefaultProperties()['attributes'] ?? null;
+        } catch (Throwable) {
+            return [];
+        }
+
+        if (! is_array($attributes)) {
+            return [];
+        }
+
+        $properties = [];
+
+        foreach ($attributes as $key => $value) {
+            $name = is_string($key) ? $key : (is_string($value) ? $value : null);
+
+            if ($name !== null) {
+                $properties[$name] = $this->fallback($name);
+            }
+        }
+
+        return $properties;
+    }
+
+    /**
+     * @return array<string, array<string, mixed>>
+     */
+    private function jsonApiRelationships(string $resourceClass): array
+    {
+        $array = $this->methodArray($resourceClass, 'toRelationships');
+        $names = [];
+
+        if ($array instanceof Node\Expr\Array_) {
+            foreach ($array->items as $item) {
+                if (! $item instanceof Node\ArrayItem) {
+                    continue;
+                }
+
+                if ($item->key instanceof Scalar\String_) {
+                    $names[] = $item->key->value;
+                } elseif ($item->value instanceof Scalar\String_) {
+                    $names[] = $item->value->value;
+                }
+            }
+        }
+
+        try {
+            $relationships = (new ReflectionClass($resourceClass))->getDefaultProperties()['relationships'] ?? null;
+        } catch (Throwable) {
+            $relationships = null;
+        }
+
+        if (is_array($relationships)) {
+            foreach ($relationships as $key => $value) {
+                if (is_string($key)) {
+                    $names[] = $key;
+                } elseif (is_string($value) && ! class_exists($value)) {
+                    $names[] = $value;
+                }
+            }
+        }
+
+        $schemas = [];
+
+        foreach (array_values(array_unique($names)) as $name) {
+            $schemas[$name] = [
+                'type' => 'object',
+                'properties' => [
+                    'data' => [
+                        'oneOf' => [
+                            $this->jsonApiResourceIdentifier(),
+                            ['type' => 'array', 'items' => $this->jsonApiResourceIdentifier()],
+                            ['type' => 'null'],
+                        ],
+                    ],
+                ],
+            ];
+        }
+
+        return $schemas;
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function jsonApiResourceIdentifier(): array
+    {
+        return [
+            'type' => 'object',
+            'properties' => [
+                'id' => ['type' => 'string'],
+                'type' => ['type' => 'string'],
+            ],
+        ];
+    }
+
+    private function jsonApiType(string $resourceClass): string
+    {
+        $return = $this->methodReturnExpression($resourceClass, 'toType');
+
+        if ($return instanceof Scalar\String_) {
+            return $return->value;
+        }
+
+        return (string) Str::of(class_basename($resourceClass))
+            ->beforeLast('Resource')
+            ->snake()
+            ->pluralStudly();
+    }
+
+    /**
+     * @return array<string, array<string, mixed>>
+     */
+    private function methodProperties(string $class, string $method, int $depth): array
+    {
+        $array = $this->methodArray($class, $method);
+
+        return $array instanceof Node\Expr\Array_ ? $this->properties($array, $depth) : [];
+    }
+
+    private function methodArray(string $class, string $method): ?Node\Expr\Array_
+    {
+        $expr = $this->methodReturnExpression($class, $method);
+
+        return $expr instanceof Node\Expr\Array_ ? $expr : $this->arrayFromExpression($expr ?? new Node\Expr\Array_([]));
+    }
+
+    private function methodReturnExpression(string $class, string $method): ?Node\Expr
+    {
+        if (! method_exists($class, $method)) {
+            return null;
+        }
+
+        try {
+            $reflection = new ReflectionMethod($class, $method);
+        } catch (Throwable) {
+            return null;
+        }
+
+        if ($reflection->getDeclaringClass()->getName() !== $class) {
+            return null;
+        }
+
+        return $this->source->firstReturnExpression($reflection);
     }
 
     /**

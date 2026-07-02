@@ -236,6 +236,9 @@ return [
         'openapi_transformers' => [
             // App\Documentator\AddInternalMetadata::class,
         ],
+        'validation_rule_transformers' => [
+            // App\Documentator\TransformsMoneyRule::class,
+        ],
     ],
 
     /*

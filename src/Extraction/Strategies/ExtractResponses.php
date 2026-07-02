@@ -18,6 +18,7 @@ use ReflectionNamedType;
 use Throwable;
 use Tsitsishvili\Documentator\Attributes\SchemaName;
 use Tsitsishvili\Documentator\Data\EndpointData;
+use Tsitsishvili\Documentator\Data\ParameterData;
 use Tsitsishvili\Documentator\Data\ResponseData;
 use Tsitsishvili\Documentator\Extraction\ExtractionStrategy;
 use Tsitsishvili\Documentator\Extraction\Support\RouteActionReflection;
@@ -53,20 +54,32 @@ final class ExtractResponses implements ExtractionStrategy
         if (($collection = $this->resourceCollectionCall($action)) !== null) {
             $resource = $collection['resource'];
             $paginated = $collection['paginated'];
+            $jsonApi = $this->schemas->isJsonApiResource($resource);
             $endpoint->responses[$status] ??= new ResponseData(
                 status: $status,
                 description: $this->describe($status),
                 resource: $resource,
-                schema: $paginated
-                    ? PaginationSchema::paginated($this->schemas->extract($resource), null)
-                    : PaginationSchema::collection($this->schemas->extract($resource)),
+                schema: $jsonApi
+                    ? $this->schemas->jsonApiCollection($resource, $paginated)
+                    : ($paginated
+                        ? PaginationSchema::paginated($this->schemas->extract($resource), null)
+                        : PaginationSchema::collection($this->schemas->extract($resource))),
+                mediaType: $jsonApi ? 'application/vnd.api+json' : null,
                 schemaName: $this->schemaName($resource),
             );
 
             if ($paginated) {
-                foreach (PaginationSchema::queryParameters() as $name => $param) {
+                $queryParameters = $collection['jsonApiPaginated']
+                    ? PaginationSchema::jsonApiQueryParameters()
+                    : PaginationSchema::queryParameters();
+
+                foreach ($queryParameters as $name => $param) {
                     $endpoint->queryParameters[$name] ??= $param;
                 }
+            }
+
+            if ($jsonApi) {
+                $this->addJsonApiQueryParameters($endpoint, $resource);
             }
         }
 
@@ -96,13 +109,19 @@ final class ExtractResponses implements ExtractionStrategy
                 $endpoint->queryParameters[$name] ??= $param;
             }
         } elseif (is_subclass_of($class, JsonResource::class)) {
+            $jsonApi = $this->schemas->isJsonApiResource($class);
             $endpoint->responses[$status] ??= new ResponseData(
                 status: $status,
                 description: $this->describe($status),
                 resource: $class,
                 schema: $this->schemas->extract($class),
+                mediaType: $jsonApi ? 'application/vnd.api+json' : null,
                 schemaName: $this->schemaName($class),
             );
+
+            if ($jsonApi) {
+                $this->addJsonApiQueryParameters($endpoint, $class);
+            }
         } elseif (is_subclass_of($class, Model::class)) {
             $endpoint->responses[$status] ??= new ResponseData(
                 status: $status,
@@ -125,7 +144,7 @@ final class ExtractResponses implements ExtractionStrategy
     }
 
     /**
-     * @return array{resource: class-string<JsonResource>, paginated: bool}|null
+     * @return array{resource: class-string<JsonResource>, paginated: bool, jsonApiPaginated: bool}|null
      */
     private function resourceCollectionCall(ReflectionFunctionAbstract $action): ?array
     {
@@ -144,9 +163,13 @@ final class ExtractResponses implements ExtractionStrategy
             return null;
         }
 
+        $jsonApiPaginated = isset($return->args[0]) && $this->containsJsonApiPaginatorCall($return->args[0]->value);
+        $paginated = $jsonApiPaginated || (isset($return->args[0]) && $this->containsPaginatorCall($return->args[0]->value));
+
         return [
             'resource' => $resource,
-            'paginated' => isset($return->args[0]) && $this->containsPaginatorCall($return->args[0]->value),
+            'paginated' => $paginated,
+            'jsonApiPaginated' => $jsonApiPaginated,
         ];
     }
 
@@ -162,6 +185,16 @@ final class ExtractResponses implements ExtractionStrategy
             fn (Node $node) => $node instanceof Node\Expr\MethodCall
                 && $node->name instanceof Node\Identifier
                 && in_array($node->name->toString(), ['paginate', 'simplePaginate', 'cursorPaginate'], true),
+        ) !== null;
+    }
+
+    private function containsJsonApiPaginatorCall(Node\Expr $expr): bool
+    {
+        return (new NodeFinder)->findFirst(
+            $expr,
+            fn (Node $node) => $node instanceof Node\Expr\MethodCall
+                && $node->name instanceof Node\Identifier
+                && $node->name->toString() === 'jsonPaginate',
         ) !== null;
     }
 
@@ -194,5 +227,29 @@ final class ExtractResponses implements ExtractionStrategy
         }
 
         return null;
+    }
+
+    private function addJsonApiQueryParameters(EndpointData $endpoint, string $resource): void
+    {
+        $endpoint->queryParameters['include'] ??= new ParameterData(
+            name: 'include',
+            type: 'string',
+            required: false,
+            description: 'JSON:API relationship includes. Multiple values may be comma-separated.',
+            schema: ['type' => 'string'],
+            style: 'form',
+            explode: false,
+        );
+
+        $fields = 'fields['.$this->schemas->jsonApiTypeName($resource).']';
+        $endpoint->queryParameters[$fields] ??= new ParameterData(
+            name: $fields,
+            type: 'string',
+            required: false,
+            description: 'JSON:API sparse fieldset for this resource type. Multiple values may be comma-separated.',
+            schema: ['type' => 'string'],
+            style: 'form',
+            explode: false,
+        );
     }
 }

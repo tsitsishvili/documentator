@@ -6,12 +6,14 @@ namespace Tsitsishvili\Documentator\Extraction\Support;
 
 use BackedEnum;
 use Illuminate\Http\Request;
+use PhpParser\Comment;
 use PhpParser\Node;
 use PhpParser\NodeFinder;
 use ReflectionFunctionAbstract;
 use ReflectionNamedType;
 use Tsitsishvili\Documentator\Data\ParameterData;
 use Tsitsishvili\Documentator\OpenApi\SchemaType;
+use Tsitsishvili\Documentator\OpenApi\TypeStringParser;
 
 /**
  * Finds literal inline Laravel validation arrays in controller methods and
@@ -77,6 +79,7 @@ final class InlineValidationRulesExtractor
 
         $requestNames = $this->requestParameterNames($action);
         $parameters = [];
+        $docs = $this->requestAccessorDocs($functionNode, $requestNames);
 
         foreach ((new NodeFinder)->find($functionNode, fn (Node $node) => $node instanceof Node\Expr\MethodCall) as $call) {
             if (! $call instanceof Node\Expr\MethodCall || ! $call->name instanceof Node\Identifier) {
@@ -100,12 +103,12 @@ final class InlineValidationRulesExtractor
             }
 
             $parameters[$method.'|'.$name] = [
-                'parameter' => new ParameterData(
+                'parameter' => $this->withDocs(new ParameterData(
                     name: $name,
                     type: SchemaType::fromRequestAccessor($method, $name)->toSchema()['type'],
                     schema: SchemaType::fromRequestAccessor($method, $name)->toSchema(),
-                ),
-                'location' => $method === 'query' ? 'query' : ($method === 'post' ? 'body' : null),
+                ), $docs[$name] ?? []),
+                'location' => $docs[$name]['location'] ?? ($method === 'query' ? 'query' : ($method === 'post' ? 'body' : null)),
             ];
         }
 
@@ -122,16 +125,87 @@ final class InlineValidationRulesExtractor
 
             $schema = SchemaType::fromName($name)->toSchema();
             $parameters['request|'.$name] = [
-                'parameter' => new ParameterData(
+                'parameter' => $this->withDocs(new ParameterData(
                     name: $name,
                     type: $schema['type'],
                     schema: $schema,
-                ),
-                'location' => null,
+                ), $docs[$name] ?? []),
+                'location' => $docs[$name]['location'] ?? null,
             ];
         }
 
-        return array_values($parameters);
+        return array_values(array_filter($parameters, fn (array $item): bool => $item['parameter'] instanceof ParameterData));
+    }
+
+    /**
+     * @return array<string, array<string, mixed>>
+     */
+    public function parameterDocsFor(ReflectionFunctionAbstract $action): array
+    {
+        $functionNode = $this->source->functionLikeNode($action);
+
+        if ($functionNode === null) {
+            return [];
+        }
+
+        $requestNames = $this->requestParameterNames($action);
+        $docs = $this->requestAccessorDocs($functionNode, $requestNames);
+
+        foreach ((new NodeFinder)->find($functionNode, fn (Node $node) => $node instanceof Node\Expr\Array_) as $array) {
+            if (! $array instanceof Node\Expr\Array_) {
+                continue;
+            }
+
+            foreach ($array->items as $item) {
+                if (! $item instanceof Node\ArrayItem || ! $item->key instanceof Node\Scalar\String_) {
+                    continue;
+                }
+
+                $parsed = $this->parseDocComments($item->getComments());
+
+                if ($parsed !== []) {
+                    $name = $this->docKeyForField($item->key->value);
+                    $docs[$name] = array_replace($docs[$name] ?? [], $parsed);
+                }
+            }
+        }
+
+        return $docs;
+    }
+
+    /**
+     * @param  array<string, mixed>  $docs
+     */
+    public function withDocs(ParameterData $parameter, array $docs): ?ParameterData
+    {
+        if (($docs['ignore'] ?? false) === true) {
+            return null;
+        }
+
+        if (isset($docs['type']) && is_string($docs['type'])) {
+            $schema = TypeStringParser::parse($docs['type']);
+
+            if ($schema !== null) {
+                $parameter->type = is_string($schema['type'] ?? null) ? $schema['type'] : $parameter->type;
+                $parameter->schema = array_replace($parameter->schema ?? [], $schema);
+            }
+        }
+
+        if (isset($docs['description']) && is_string($docs['description']) && $docs['description'] !== '') {
+            $parameter->description = $docs['description'];
+        }
+
+        if (array_key_exists('example', $docs)) {
+            $parameter->example = $docs['example'];
+        }
+
+        if (array_key_exists('default', $docs)) {
+            $schema = $parameter->schema ?? ['type' => $parameter->type];
+            $schema['default'] = $docs['default'];
+            $parameter->schema = $schema;
+        }
+
+        return $parameter;
     }
 
     /**
@@ -306,45 +380,78 @@ final class InlineValidationRulesExtractor
                 continue;
             }
 
-            $rule = $this->ruleString($item->value);
-
-            if ($rule !== null) {
-                $rules[] = $rule;
-            }
+            array_push($rules, ...$this->ruleStrings($item->value));
         }
 
         return $rules === [] ? null : $rules;
     }
 
-    private function ruleString(Node\Expr $expr): ?string
+    /**
+     * @return array<int, string>
+     */
+    private function ruleStrings(Node\Expr $expr): array
     {
         if ($expr instanceof Node\Scalar\String_) {
-            return $expr->value;
+            return [$expr->value];
         }
 
         if (! $expr instanceof Node\Expr\StaticCall || ! $expr->name instanceof Node\Identifier) {
-            return null;
+            return [];
         }
 
         $method = strtolower($expr->name->toString());
 
         if (! $this->isValidationRuleClass($expr->class)) {
-            return null;
+            return [];
         }
 
         if ($method === 'in') {
             $values = $this->valuesFromRuleArgument($expr->args[0]->value ?? null);
 
-            return $values === [] ? null : 'in:'.implode(',', $values);
+            return $values === [] ? [] : ['in:'.implode(',', $values)];
         }
 
         if ($method === 'enum') {
             $values = $this->enumValuesFromRuleArgument($expr->args[0]->value ?? null);
 
-            return $values === [] ? null : 'in:'.implode(',', $values);
+            return $values === [] ? [] : ['in:'.implode(',', $values)];
         }
 
-        return null;
+        if ($method === 'exists') {
+            $table = $this->literalValue($expr->args[0]->value ?? null);
+            $column = $this->literalValue($expr->args[1]->value ?? null) ?? 'NULL';
+
+            return $table === null ? [] : ['exists:'.$table.','.$column];
+        }
+
+        if (in_array($method, ['when', 'unless'], true)) {
+            return array_merge(
+                $this->rulesFromRuleExpression($expr->args[1]->value ?? null),
+                $this->rulesFromRuleExpression($expr->args[2]->value ?? null),
+            );
+        }
+
+        return [];
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function rulesFromRuleExpression(?Node\Expr $expr): array
+    {
+        if ($expr instanceof Node\Expr\Array_) {
+            $rules = [];
+
+            foreach ($expr->items as $item) {
+                if ($item instanceof Node\ArrayItem) {
+                    array_push($rules, ...$this->ruleStrings($item->value));
+                }
+            }
+
+            return $rules;
+        }
+
+        return $expr instanceof Node\Expr ? $this->ruleStrings($expr) : [];
     }
 
     private function isValidationRuleClass(Node\Name|Node\Expr $class): bool
@@ -421,5 +528,143 @@ final class InlineValidationRulesExtractor
             $expr instanceof Node\Expr\ConstFetch && in_array(strtolower($expr->name->toString()), ['true', 'false'], true) => strtolower($expr->name->toString()),
             default => null,
         };
+    }
+
+    /**
+     * @param  array<int, string>  $requestNames
+     * @return array<string, array<string, mixed>>
+     */
+    private function requestAccessorDocs(Node $functionNode, array $requestNames): array
+    {
+        $docs = [];
+
+        foreach ((new NodeFinder)->find($functionNode, fn (Node $node) => $node instanceof Node\Stmt\Expression) as $statement) {
+            if (! $statement instanceof Node\Stmt\Expression) {
+                continue;
+            }
+
+            $parsed = $this->parseDocComments($statement->getComments());
+
+            if ($parsed === []) {
+                continue;
+            }
+
+            $call = (new NodeFinder)->findFirst($statement->expr, function (Node $node) use ($requestNames): bool {
+                return $node instanceof Node\Expr\MethodCall
+                    && $node->name instanceof Node\Identifier
+                    && $this->isRequestExpression($node->var, $requestNames)
+                    && in_array(strtolower($node->name->toString()), $this->requestAccessorMethods(), true);
+            });
+
+            if (! $call instanceof Node\Expr\MethodCall) {
+                continue;
+            }
+
+            $name = $this->stringArgument($call->args, 0);
+
+            if ($name !== null && $name !== '') {
+                $docs[$name] = array_replace($docs[$name] ?? [], $parsed);
+            }
+        }
+
+        return $docs;
+    }
+
+    /**
+     * @param  array<int, Comment>  $comments
+     * @return array<string, mixed>
+     */
+    private function parseDocComments(array $comments): array
+    {
+        $text = trim(implode("\n", array_map(fn ($comment): string => $comment->getText(), $comments)));
+
+        if ($text === '') {
+            return [];
+        }
+
+        $text = (string) preg_replace('#^/\*\*?#', '', $text);
+        $text = (string) preg_replace('#\*/$#', '', $text);
+        $lines = array_map(
+            fn (string $line): string => trim((string) preg_replace('#^\s*\*\s?#', '', $line)),
+            preg_split('/\R/', $text) ?: [],
+        );
+
+        $docs = [];
+        $description = [];
+
+        foreach ($lines as $line) {
+            if ($line === '') {
+                continue;
+            }
+
+            if (preg_match('/^@var\s+(\S+)/', $line, $matches) === 1) {
+                $docs['type'] = $matches[1];
+            } elseif (preg_match('/^@example\s+(.+)/', $line, $matches) === 1) {
+                $docs['example'] = $this->docValue($matches[1]);
+            } elseif (preg_match('/^@default\s+(.+)/', $line, $matches) === 1) {
+                $docs['default'] = $this->docValue($matches[1]);
+            } elseif (preg_match('/^@(query|body)$/', $line, $matches) === 1) {
+                $docs['location'] = $matches[1];
+            } elseif (preg_match('/^@ignoreParam$/i', $line) === 1) {
+                $docs['ignore'] = true;
+            } elseif (preg_match('/^@description\s+(.+)/', $line, $matches) === 1) {
+                $description[] = $matches[1];
+            } elseif (! str_starts_with($line, '@')) {
+                $description[] = $line;
+            }
+        }
+
+        if ($description !== []) {
+            $docs['description'] = implode(' ', $description);
+        }
+
+        return $docs;
+    }
+
+    private function docValue(string $value): mixed
+    {
+        $value = trim($value, " \t\n\r\0\x0B\"'");
+        $lower = strtolower($value);
+
+        return match (true) {
+            $lower === 'true' => true,
+            $lower === 'false' => false,
+            $lower === 'null' => null,
+            is_numeric($value) && str_contains($value, '.') => (float) $value,
+            is_numeric($value) => (int) $value,
+            default => $value,
+        };
+    }
+
+    private function docKeyForField(string $field): string
+    {
+        $current = '';
+        $escaped = false;
+        $length = strlen($field);
+
+        for ($i = 0; $i < $length; $i++) {
+            $char = $field[$i];
+
+            if ($escaped) {
+                $current .= $char;
+                $escaped = false;
+
+                continue;
+            }
+
+            if ($char === '\\') {
+                $escaped = true;
+
+                continue;
+            }
+
+            if ($char === '.') {
+                return $current;
+            }
+
+            $current .= $char;
+        }
+
+        return $current;
     }
 }

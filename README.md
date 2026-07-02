@@ -49,10 +49,11 @@ pipeline enriches the endpoint:
 | Route definition | verbs, URI, **typed path params** (numeric constraint / bound-model key → `integer`), name, auth guess from `auth` middleware |
 | Controller/closure PHPDoc | **summary** (first line) and **description** (the rest), so written docblocks become docs |
 | FormRequest `rules()` | parameters with types, required, **enums** (`in:`, `Rule::enum`, `Rule::in`), **formats** (email/uuid/date), bounds (`min`/`max`), `regex`→`pattern`, `digits`→integer, `confirmed`→a `_confirmation` field, nullability, **nested** rules (`items.*.id`), **file uploads** → multipart. On GET/HEAD routes these become **query parameters** instead of a body |
-| Inline validation / request access | the same rule parsing for literal `$request->validate([...])`, `request()->validate([...])`, `Validator::make(..., [...])` arrays, plus request accessors like `$request->integer('page')`, `$request->boolean('active')`, `$request->query('q')` |
+| Inline validation / request access | the same rule parsing for literal `$request->validate([...])`, `request()->validate([...])`, `Validator::make(..., [...])` arrays, plus request accessors like `$request->integer('page')`, `$request->boolean('active')`, `$request->query('q')`. Local PHPDoc tags can refine inline params: `@var`, `@example`, `@default`, `@query`, `@body`, `@ignoreParam` |
 | spatie/laravel-data | request/response **Data objects** — typed properties, enums, nested Data, collections (optional, auto-detected) |
-| spatie/laravel-query-builder | query params from literal `allowedFilters`, `allowedSorts`, `allowedIncludes` and `allowedFields` calls (optional, auto-detected from source; no runtime dependency) |
-| Route action return type / return statement | a success response schema from a Resource's `toArray()`, a `ResourceCollection`, a `Resource::collection($q->paginate())` **return statement** (**paginator envelope** + `page`/`per_page` query params), literal `response()->json([...], 202)` payloads, common Laravel response helpers (`response()`, `view()`, redirects), service methods that return arrays, or an **Eloquent model** (`$casts` + `@property`). Status follows the verb: POST → **201**, DELETE → **204** |
+| spatie/laravel-query-builder | query params from literal `allowedFilters`, `allowedSorts`, `allowedIncludes` and `allowedFields` calls, including simple helper methods and custom `*QueryBuilder` subclasses (optional, auto-detected from source; no runtime dependency) |
+| Laravel Actions | `rules()` on action classes and `handle()` return types for routes pointing at `asController()` (optional, auto-detected; no runtime dependency on the package) |
+| Route action return type / return statement | a success response schema from a Resource's `toArray()`, Laravel 13 `JsonApiResource` (`application/vnd.api+json`, `include`, `fields[type]`), a `ResourceCollection`, a `Resource::collection($q->paginate())` **return statement** (**paginator envelope** + `page`/`per_page` query params), `jsonPaginate()` (`page[number]` / `page[size]`), literal `response()->json([...], 202)` payloads, common Laravel response helpers (`response()`, `view()`, redirects), service methods that return arrays, or an **Eloquent model** (`$casts` + `@property`). Status follows the verb: POST → **201**, DELETE → **204** |
 | Generated examples | a representative `example` for every body/parameter — format- and name-aware (`email`→`user@example.com`, `*_url`, `*_name`, dates, enums, …) so the playground starts filled |
 | PHP attributes | overrides for everything above (runs last) |
 
@@ -145,6 +146,37 @@ Eloquent model it wraps (otherwise the model is resolved by naming convention,
 configurable via `models_namespace`), so field types come from the model's casts.
 Use `#[SchemaName('PublicOrder')]` on a Resource or ResourceCollection when you
 want a stable `components.schemas` name instead of the class basename.
+
+### Inline parameter PHPDoc
+
+When a controller validates inline, attach a small docblock to a validation item
+or request accessor to refine the inferred parameter:
+
+```php
+$request->validate([
+    /**
+     * Literal API key. The escaped dot stays part of the field name.
+     *
+     * @var uuid
+     * @example 9f40d932-c4c0-4a36-9fb5-10d18c2a1f61
+     * @default 9f40d932-c4c0-4a36-9fb5-10d18c2a1f61
+     */
+    'user\.uuid' => ['required', Rule::exists('users', 'uuid')],
+
+    /** @ignoreParam */
+    'internal_only' => ['string'],
+]);
+
+/**
+ * @query
+ * @var int
+ * @default 25
+ */
+$request->input('per_page');
+```
+
+Validation keys split on unescaped dots (`items.*.id`) and preserve escaped
+dots (`user\.uuid`) as literal property names.
 
 ## Authentication
 
@@ -296,6 +328,7 @@ Key options in `config/documentator.php`:
 - `ui.assets` — Scalar bundle URL when `ui.driver = scalar` (pinned; self-host for SRI/CSP).
 - `cache` — pre-generated spec file.
 - `extensions.strategies` / `extensions.openapi_transformers` — register custom extraction strategies (resolved from the container, inserted just before attribute overrides) and transformers that receive the generated spec array and may return a modified one. See [CONTRIBUTING.md](CONTRIBUTING.md).
+- `extensions.validation_rule_transformers` — register classes implementing `Tsitsishvili\Documentator\Contracts\ValidationRuleTransformer` to map project-specific Laravel validation rules to OpenAPI schemas.
 
 ## Development
 

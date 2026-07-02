@@ -20,7 +20,9 @@
     },
     "suggest": {
         "spatie/laravel-data": "Auto-document request/response Data objects (^4.0).",
-        "spatie/laravel-query-builder": "Auto-document allowed filters, sorts, includes and sparse fieldsets (^6.0)."
+        "spatie/laravel-json-api-paginate": "Auto-document JSON:API pagination query parameters when jsonPaginate() is used (^1.0).",
+        "spatie/laravel-query-builder": "Auto-document allowed filters, sorts, includes and sparse fieldsets (^6.0).",
+        "lorisleiva/laravel-actions": "Auto-document action rules() and handle() return types (^2.0)."
     },
     "autoload": {
         "psr-4": {

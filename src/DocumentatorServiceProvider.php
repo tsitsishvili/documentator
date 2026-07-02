@@ -18,6 +18,7 @@ use Tsitsishvili\Documentator\Extraction\Strategies\ExtractErrorResponses;
 use Tsitsishvili\Documentator\Extraction\Strategies\ExtractFormRequestRules;
 use Tsitsishvili\Documentator\Extraction\Strategies\ExtractInlineResponses;
 use Tsitsishvili\Documentator\Extraction\Strategies\ExtractInlineValidationRules;
+use Tsitsishvili\Documentator\Extraction\Strategies\ExtractLaravelActions;
 use Tsitsishvili\Documentator\Extraction\Strategies\ExtractResponses;
 use Tsitsishvili\Documentator\Extraction\Strategies\ExtractRouteMetadata;
 use Tsitsishvili\Documentator\Extraction\Strategies\ExtractSpatieQueryBuilder;
@@ -49,6 +50,7 @@ final class DocumentatorServiceProvider extends ServiceProvider
             return new ExtractorPipeline([
                 $app->make(ExtractRouteMetadata::class),
                 $app->make(ExtractFormRequestRules::class),
+                $app->make(ExtractLaravelActions::class),
                 $app->make(ExtractInlineValidationRules::class),
                 $app->make(ExtractDataObjects::class),
                 $app->make(ExtractSpatieQueryBuilder::class),

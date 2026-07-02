@@ -43,6 +43,31 @@ final class PaginationSchema
     }
 
     /**
+     * Query parameter names used by spatie/laravel-json-api-paginate.
+     *
+     * @return array<string, ParameterData>
+     */
+    public static function jsonApiQueryParameters(): array
+    {
+        return [
+            'page[number]' => new ParameterData(
+                name: 'page[number]',
+                type: 'integer',
+                description: 'JSON:API page number of the paginated result set.',
+                example: 1,
+                schema: ['type' => 'integer', 'minimum' => 1],
+            ),
+            'page[size]' => new ParameterData(
+                name: 'page[size]',
+                type: 'integer',
+                description: 'JSON:API number of items to return per page.',
+                example: 15,
+                schema: ['type' => 'integer', 'minimum' => 1],
+            ),
+        ];
+    }
+
+    /**
      * `{ "data": [ item ] }` — a non-paginated resource collection.
      *
      * @param  array<string, mixed>  $item
