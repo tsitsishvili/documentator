@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace Tsitsishvili\Documentator\Extraction\Support;
 
+use Illuminate\Validation\ConditionalRules;
+use Throwable;
+use Tsitsishvili\Documentator\Contracts\ValidationRuleTransformer;
 use Tsitsishvili\Documentator\Data\ParameterData;
 
 /**
@@ -27,11 +30,12 @@ final class RuleParser
                 continue;
             }
             $list = self::ruleList($ruleset);
-            self::insert($root, explode('.', $field), $list);
+            $segments = self::fieldSegments($field);
+            self::insert($root, $segments, $list, $field);
 
             // `confirmed` makes Laravel expect a matching `{field}_confirmation`.
-            if (! str_contains($field, '.') && self::has($list, 'confirmed')) {
-                $confirmed[] = $field;
+            if (count($segments) === 1 && self::has($list, 'confirmed')) {
+                $confirmed[] = $segments[0];
             }
         }
 
@@ -104,7 +108,7 @@ final class RuleParser
      * @param  array<int, string>  $rules
      * @param  array<string, mixed>  $node
      */
-    private static function insert(array &$node, array $segments, array $rules): void
+    private static function insert(array &$node, array $segments, array $rules, string $field): void
     {
         $seg = array_shift($segments);
 
@@ -112,9 +116,9 @@ final class RuleParser
             $node['type'] = 'array';
             $node['items'] ??= [];
             if ($segments === []) {
-                $node['items'] = self::scalar($rules);
+                $node['items'] = self::scalar($rules, $field);
             } else {
-                self::insert($node['items'], $segments, $rules);
+                self::insert($node['items'], $segments, $rules, $field);
             }
 
             return;
@@ -125,7 +129,7 @@ final class RuleParser
         $node['properties'][$seg] ??= [];
 
         if ($segments === []) {
-            $node['properties'][$seg] = self::mergeScalar($node['properties'][$seg], $rules);
+            $node['properties'][$seg] = self::mergeScalar($node['properties'][$seg], $rules, $field);
             if (self::has($rules, 'required')) {
                 $node['required'] ??= [];
                 if (! in_array($seg, $node['required'], true)) {
@@ -133,7 +137,7 @@ final class RuleParser
                 }
             }
         } else {
-            self::insert($node['properties'][$seg], $segments, $rules);
+            self::insert($node['properties'][$seg], $segments, $rules, $field);
         }
     }
 
@@ -145,7 +149,7 @@ final class RuleParser
      * @param  array<int, string>  $rules
      * @return array<string, mixed>
      */
-    private static function mergeScalar(array $existing, array $rules): array
+    private static function mergeScalar(array $existing, array $rules, string $field): array
     {
         if (isset($existing['properties']) || isset($existing['items'])) {
             if (self::has($rules, 'nullable')) {
@@ -155,14 +159,14 @@ final class RuleParser
             return $existing;
         }
 
-        return self::scalar($rules);
+        return self::scalar($rules, $field);
     }
 
     /**
      * @param  array<int, string>  $rules
      * @return array<string, mixed>
      */
-    private static function scalar(array $rules): array
+    private static function scalar(array $rules, string $field): array
     {
         $type = self::typeFor($rules);
         $enum = self::enumFor($rules);
@@ -214,7 +218,7 @@ final class RuleParser
             $schema['nullable'] = true;
         }
 
-        return $schema;
+        return self::applyTransformers($schema, $rules, $field);
     }
 
     /**
@@ -232,13 +236,16 @@ final class RuleParser
         $rules = [];
         foreach ($raw as $rule) {
             if (is_string($rule)) {
-                $rules[] = $rule;
+                array_push($rules, ...explode('|', $rule));
+            } elseif ($rule instanceof ConditionalRules) {
+                array_push($rules, ...self::ruleList($rule->rules()));
+                array_push($rules, ...self::ruleList($rule->defaultRules()));
             } elseif (is_object($rule) && method_exists($rule, '__toString')) {
                 $rules[] = (string) $rule;
             }
         }
 
-        return $rules;
+        return array_values(array_filter($rules, fn (string $rule): bool => $rule !== ''));
     }
 
     /**
@@ -275,6 +282,14 @@ final class RuleParser
      */
     private static function typeFor(array $rules): string
     {
+        if (($exists = self::arg($rules, 'exists')) !== null) {
+            $column = strtolower(explode(',', $exists)[1] ?? '');
+
+            if ($column === 'id' || $column === '' || str_ends_with($column, '_id')) {
+                return 'integer';
+            }
+        }
+
         return match (true) {
             self::has($rules, 'integer'), self::has($rules, 'digits'), self::has($rules, 'digits_between') => 'integer',
             self::has($rules, 'numeric'), self::has($rules, 'decimal') => 'number',
@@ -324,6 +339,14 @@ final class RuleParser
      */
     private static function formatFor(array $rules): ?string
     {
+        if (($exists = self::arg($rules, 'exists')) !== null) {
+            $column = strtolower(explode(',', $exists)[1] ?? '');
+
+            if ($column === 'uuid' || str_ends_with($column, '_uuid')) {
+                return 'uuid';
+            }
+        }
+
         return match (true) {
             self::has($rules, 'file'), self::has($rules, 'image') => 'binary',
             self::has($rules, 'email') => 'email',
@@ -375,5 +398,101 @@ final class RuleParser
             is_numeric($min) ? (float) $min : null,
             is_numeric($max) ? (float) $max : null,
         ];
+    }
+
+    /**
+     * Split Laravel validation field keys on unescaped dots. `user\.name`
+     * addresses a literal key named "user.name", while `user.name` nests.
+     *
+     * @return array<int, string>
+     */
+    private static function fieldSegments(string $field): array
+    {
+        $segments = [];
+        $current = '';
+        $escaped = false;
+        $length = strlen($field);
+
+        for ($i = 0; $i < $length; $i++) {
+            $char = $field[$i];
+
+            if ($escaped) {
+                $current .= $char;
+                $escaped = false;
+
+                continue;
+            }
+
+            if ($char === '\\') {
+                $escaped = true;
+
+                continue;
+            }
+
+            if ($char === '.') {
+                $segments[] = $current;
+                $current = '';
+
+                continue;
+            }
+
+            $current .= $char;
+        }
+
+        if ($escaped) {
+            $current .= '\\';
+        }
+
+        $segments[] = $current;
+
+        return $segments;
+    }
+
+    /**
+     * @param  array<string, mixed>  $schema
+     * @param  array<int, string>  $rules
+     * @return array<string, mixed>
+     */
+    private static function applyTransformers(array $schema, array $rules, string $field): array
+    {
+        foreach (self::transformers() as $transformer) {
+            foreach ($rules as $rule) {
+                try {
+                    $transformed = $transformer->transform($rule, $schema, $rules, $field);
+                } catch (Throwable) {
+                    continue;
+                }
+
+                if (is_array($transformed)) {
+                    $schema = $transformed;
+                }
+            }
+        }
+
+        return $schema;
+    }
+
+    /**
+     * @return array<int, ValidationRuleTransformer>
+     */
+    private static function transformers(): array
+    {
+        $transformers = [];
+
+        foreach ((array) config('documentator.extensions.validation_rule_transformers', []) as $transformer) {
+            try {
+                $instance = is_string($transformer) && function_exists('app')
+                    ? app($transformer)
+                    : $transformer;
+            } catch (Throwable) {
+                continue;
+            }
+
+            if ($instance instanceof ValidationRuleTransformer) {
+                $transformers[] = $instance;
+            }
+        }
+
+        return $transformers;
     }
 }

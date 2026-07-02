@@ -198,6 +198,8 @@ final class OpenApiGenerator
             'required' => $required,
             'description' => $param->description,
             'schema' => $schema,
+            'style' => $param->style,
+            'explode' => $param->explode,
             'example' => $param->example ?? ($this->generatesExamples() ? SchemaSampler::sample($schema) : null),
         ], fn ($value) => $value !== null);
 

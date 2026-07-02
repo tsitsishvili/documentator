@@ -35,9 +35,18 @@ final class ExtractInlineValidationRules implements ExtractionStrategy
         $readOnly = $verbs !== [] && array_diff($verbs, ['get', 'head']) === [];
 
         $rules = $this->rules->rulesFor($action);
+        $docs = $this->rules->parameterDocsFor($action);
 
         foreach (RuleParser::parse($rules) as $param) {
-            if ($readOnly) {
+            $param = $this->rules->withDocs($param, $docs[$param->name] ?? []);
+
+            if ($param === null) {
+                continue;
+            }
+
+            $location = $docs[$param->name]['location'] ?? null;
+
+            if ($location === 'query' || ($location === null && $readOnly)) {
                 $endpoint->queryParameters[$param->name] ??= $param;
             } else {
                 $endpoint->bodyParameters[$param->name] ??= $param;

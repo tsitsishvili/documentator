@@ -36,56 +36,144 @@ final class ExtractSpatieQueryBuilder implements ExtractionStrategy
             return $endpoint;
         }
 
-        $queryBuilderVariables = $this->queryBuilderVariables($functionNode);
-        $literalVariables = $this->literalVariables($functionNode, $action);
+        $functionNodes = $this->functionNodes($functionNode, $action);
+        $queryBuilderMethods = $this->queryBuilderReturningMethods($functionNodes);
+        $queryBuilderVariables = $this->queryBuilderVariables($functionNodes, $queryBuilderMethods);
+        $literalVariables = $this->literalVariables($functionNodes, $action);
 
-        foreach ((new NodeFinder)->find($functionNode, fn (Node $node) => $node instanceof Node\Expr\MethodCall) as $call) {
-            if (! $call instanceof Node\Expr\MethodCall || ! $call->name instanceof Node\Identifier) {
-                continue;
+        foreach ($functionNodes as $node) {
+            foreach ((new NodeFinder)->find($node, fn (Node $node) => $node instanceof Node\Expr\MethodCall) as $call) {
+                if (! $call instanceof Node\Expr\MethodCall || ! $call->name instanceof Node\Identifier) {
+                    continue;
+                }
+
+                if (! $this->isQueryBuilderCall($call, $queryBuilderVariables, $queryBuilderMethods)) {
+                    continue;
+                }
+
+                $methodName = strtolower($call->name->toString());
+                $items = $this->allowedItems($call, $literalVariables, $action);
+
+                if ($items === []) {
+                    continue;
+                }
+
+                match ($methodName) {
+                    'allowedfilters' => $this->addFilters($endpoint, $items),
+                    'allowedsorts' => $this->addSorts($endpoint, $items),
+                    'allowedincludes' => $this->addDelimitedEnum($endpoint, 'include', $this->names($items), 'Allowed relationship includes. Multiple values may be comma-separated.'),
+                    'allowedfields' => $this->addFields($endpoint, $this->names($items)),
+                    'defaultsort' => $this->addDefaultSort($endpoint, $this->names($items)),
+                    default => null,
+                };
             }
-
-            if (! $this->isQueryBuilderCall($call, $queryBuilderVariables)) {
-                continue;
-            }
-
-            $methodName = strtolower($call->name->toString());
-            $items = $this->allowedItems($call, $literalVariables, $action);
-
-            if ($items === []) {
-                continue;
-            }
-
-            match ($methodName) {
-                'allowedfilters' => $this->addFilters($endpoint, $items),
-                'allowedsorts' => $this->addSorts($endpoint, $items),
-                'allowedincludes' => $this->addDelimitedEnum($endpoint, 'include', $this->names($items), 'Allowed relationship includes. Multiple values may be comma-separated.'),
-                'allowedfields' => $this->addFields($endpoint, $this->names($items)),
-                'defaultsort' => $this->addDefaultSort($endpoint, $this->names($items)),
-                default => null,
-            };
         }
 
         return $endpoint;
     }
 
     /**
-     * @return array<string, array<int, array{name: string, ignored: array<int, string>}>>
+     * @return array<int, Node>
      */
-    private function literalVariables(Node $functionNode, ReflectionFunctionAbstract $action): array
+    private function functionNodes(Node $functionNode, ReflectionFunctionAbstract $action): array
     {
-        $variables = [];
+        $nodes = [$functionNode];
 
-        foreach ((new NodeFinder)->find($functionNode, fn (Node $node) => $node instanceof Node\Expr\Assign) as $assign) {
-            if (! $assign instanceof Node\Expr\Assign
-                || ! $assign->var instanceof Node\Expr\Variable
-                || ! is_string($assign->var->name)) {
+        if (! $action instanceof ReflectionMethod) {
+            return $nodes;
+        }
+
+        foreach ($this->calledThisMethods($functionNode) as $name) {
+            if (! method_exists($action->class, $name)) {
                 continue;
             }
 
-            $items = $this->itemsFromExpression($assign->expr, $variables, $action);
+            try {
+                $method = new ReflectionMethod($action->class, $name);
+            } catch (Throwable) {
+                continue;
+            }
 
-            if ($items !== []) {
-                $variables[$assign->var->name] = $items;
+            $node = $this->source->methodNode($method);
+
+            if ($node !== null) {
+                $nodes[] = $node;
+            }
+        }
+
+        return $nodes;
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function calledThisMethods(Node $functionNode): array
+    {
+        $methods = [];
+
+        foreach ((new NodeFinder)->find($functionNode, fn (Node $node) => $node instanceof Node\Expr\MethodCall) as $call) {
+            if (! $call instanceof Node\Expr\MethodCall
+                || ! $call->var instanceof Node\Expr\Variable
+                || $call->var->name !== 'this'
+                || ! $call->name instanceof Node\Identifier) {
+                continue;
+            }
+
+            $methods[] = $call->name->toString();
+        }
+
+        return array_values(array_unique($methods));
+    }
+
+    /**
+     * @param  array<int, Node>  $functionNodes
+     * @return array<int, string>
+     */
+    private function queryBuilderReturningMethods(array $functionNodes): array
+    {
+        $methods = [];
+
+        foreach ($functionNodes as $node) {
+            if (! $node instanceof Node\Stmt\ClassMethod) {
+                continue;
+            }
+
+            $return = (new NodeFinder)->findFirst(
+                $node,
+                fn (Node $node) => $node instanceof Node\Stmt\Return_
+                    && $node->expr instanceof Node\Expr
+                    && $this->containsQueryBuilderFor($node->expr, []),
+            );
+
+            if ($return instanceof Node\Stmt\Return_) {
+                $methods[] = $node->name->toString();
+            }
+        }
+
+        return array_values(array_unique($methods));
+    }
+
+    /**
+     * @param  array<int, Node>  $functionNodes
+     * @return array<string, array<int, array{name: string, ignored: array<int, string>}>>
+     */
+    private function literalVariables(array $functionNodes, ReflectionFunctionAbstract $action): array
+    {
+        $variables = [];
+
+        foreach ($functionNodes as $functionNode) {
+            foreach ((new NodeFinder)->find($functionNode, fn (Node $node) => $node instanceof Node\Expr\Assign) as $assign) {
+                if (! $assign instanceof Node\Expr\Assign
+                    || ! $assign->var instanceof Node\Expr\Variable
+                    || ! is_string($assign->var->name)) {
+                    continue;
+                }
+
+                $items = $this->itemsFromExpression($assign->expr, $variables, $action);
+
+                if ($items !== []) {
+                    $variables[$assign->var->name] = $items;
+                }
             }
         }
 
@@ -93,21 +181,25 @@ final class ExtractSpatieQueryBuilder implements ExtractionStrategy
     }
 
     /**
+     * @param  array<int, Node>  $functionNodes
+     * @param  array<int, string>  $queryBuilderMethods
      * @return array<int, string>
      */
-    private function queryBuilderVariables(Node $functionNode): array
+    private function queryBuilderVariables(array $functionNodes, array $queryBuilderMethods): array
     {
         $variables = [];
 
-        foreach ((new NodeFinder)->find($functionNode, fn (Node $node) => $node instanceof Node\Expr\Assign) as $assign) {
-            if (! $assign instanceof Node\Expr\Assign
-                || ! $assign->var instanceof Node\Expr\Variable
-                || ! is_string($assign->var->name)) {
-                continue;
-            }
+        foreach ($functionNodes as $functionNode) {
+            foreach ((new NodeFinder)->find($functionNode, fn (Node $node) => $node instanceof Node\Expr\Assign) as $assign) {
+                if (! $assign instanceof Node\Expr\Assign
+                    || ! $assign->var instanceof Node\Expr\Variable
+                    || ! is_string($assign->var->name)) {
+                    continue;
+                }
 
-            if ($this->containsQueryBuilderFor($assign->expr)) {
-                $variables[] = $assign->var->name;
+                if ($this->containsQueryBuilderFor($assign->expr, $queryBuilderMethods)) {
+                    $variables[] = $assign->var->name;
+                }
             }
         }
 
@@ -117,25 +209,42 @@ final class ExtractSpatieQueryBuilder implements ExtractionStrategy
     /**
      * @param  array<int, string>  $queryBuilderVariables
      */
-    private function isQueryBuilderCall(Node\Expr\MethodCall $call, array $queryBuilderVariables): bool
+    private function isQueryBuilderCall(Node\Expr\MethodCall $call, array $queryBuilderVariables, array $queryBuilderMethods): bool
     {
-        if ($this->containsQueryBuilderFor($call->var)) {
+        if ($this->containsQueryBuilderFor($call->var, $queryBuilderMethods)) {
             return true;
         }
 
         return $this->containsQueryBuilderVariable($call->var, $queryBuilderVariables);
     }
 
-    private function containsQueryBuilderFor(Node\Expr $expr): bool
+    /**
+     * @param  array<int, string>  $queryBuilderMethods
+     */
+    private function containsQueryBuilderFor(Node\Expr $expr, array $queryBuilderMethods): bool
     {
         if ($expr instanceof Node\Expr\StaticCall
             && $expr->class instanceof Node\Name
             && $expr->name instanceof Node\Identifier
             && strtolower($expr->name->toString()) === 'for') {
-            return in_array(ltrim($expr->class->toString(), '\\'), ['Spatie\QueryBuilder\QueryBuilder', 'QueryBuilder'], true);
+            $class = ltrim($expr->class->toString(), '\\');
+
+            return in_array($class, ['Spatie\QueryBuilder\QueryBuilder', 'QueryBuilder'], true)
+                || str_ends_with(class_basename($class), 'QueryBuilder');
         }
 
-        return $expr instanceof Node\Expr\MethodCall && $this->containsQueryBuilderFor($expr->var);
+        if ($expr instanceof Node\Expr\MethodCall) {
+            if ($expr->var instanceof Node\Expr\Variable
+                && $expr->var->name === 'this'
+                && $expr->name instanceof Node\Identifier
+                && in_array($expr->name->toString(), $queryBuilderMethods, true)) {
+                return true;
+            }
+
+            return $this->containsQueryBuilderFor($expr->var, $queryBuilderMethods);
+        }
+
+        return false;
     }
 
     /**

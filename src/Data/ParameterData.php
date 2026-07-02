@@ -24,5 +24,7 @@ final class ParameterData
         public ?string $description = null,
         public mixed $example = null,
         public ?array $schema = null,
+        public ?string $style = null,
+        public ?bool $explode = null,
     ) {}
 }

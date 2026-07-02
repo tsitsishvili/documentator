@@ -28,6 +28,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `allowedSorts`, `defaultSort`, `allowedIncludes` and `allowedFields` calls are
   inferred from source, including local variable arrays, class constants, simple
   aliases and literal ignored filter values.
+- **JSON:API and pagination integrations.** Laravel `JsonApiResource` responses
+  are emitted with `application/vnd.api+json`, JSON:API `data` envelopes,
+  `include` / `fields[type]` query parameters, and `jsonPaginate()`
+  `page[number]` / `page[size]` parameters.
+- **Laravel Actions inference.** Routes pointing at action `asController()`
+  methods can now infer request rules from `rules()` and response schemas from
+  `handle()` return types.
+- **Inline parameter PHPDoc.** Inline validation and request-accessor inference
+  now honors nearby `@var`, `@example`, `@default`, `@query`, `@body` and
+  `@ignoreParam` tags.
+- **Validation parser extensibility.** Validation keys now respect escaped dots
+  such as `user\.uuid`, `exists` / inline `Rule::exists` and `Rule::when` are
+  understood better, and custom rule transformers can be registered through
+  `extensions.validation_rule_transformers`.
 
 ## [1.5.0] - 2026-06-28
 
