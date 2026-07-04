@@ -340,5 +340,7 @@ composer lint          # Laravel Pint
 npm run test:browser   # Playwright checks for the built-in UI
 ```
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for the architecture tour, how to add an
-inference strategy or attribute, and the pull-request checklist.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the contribution workflow, coding
+standards, and pull-request checklist. For a file-by-file orientation, use the
+[codebase map](docs/codebase-map.md); for built-in explorer work, use the
+[UI code map](docs/built-in-ui-code-map.md).

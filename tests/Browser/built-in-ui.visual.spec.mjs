@@ -49,9 +49,11 @@ function spec(count = 650) {
 }
 
 async function mount(page) {
-  const [css, js] = await Promise.all([
+  const [css, js, core, snippets] = await Promise.all([
     readFile(resolve(root, 'resources/ui/app.css'), 'utf8'),
     readFile(resolve(root, 'resources/ui/app.js'), 'utf8'),
+    readFile(resolve(root, 'resources/ui/core.js'), 'utf8'),
+    readFile(resolve(root, 'resources/ui/snippets.js'), 'utf8'),
   ]);
 
   await page.route('http://documentator.test/docs/openapi.json', route => route.fulfill({
@@ -65,6 +67,14 @@ async function mount(page) {
   await page.route('http://documentator.test/docs/assets/app.js', route => route.fulfill({
     contentType: 'text/javascript',
     body: js,
+  }));
+  await page.route('http://documentator.test/docs/assets/core.js*', route => route.fulfill({
+    contentType: 'text/javascript',
+    body: core,
+  }));
+  await page.route('http://documentator.test/docs/assets/snippets.js*', route => route.fulfill({
+    contentType: 'text/javascript',
+    body: snippets,
   }));
   await page.route(appUrl, route => route.fulfill({
     contentType: 'text/html',
@@ -86,7 +96,7 @@ async function mount(page) {
             authStorage: 'memory'
           };
         </script>
-        <script src="/docs/assets/app.js"></script>
+        <script type="module" src="/docs/assets/app.js"></script>
       </body>
       </html>`,
   }));

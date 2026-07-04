@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.6.1] - 2026-07-04
+
+### Changed
+
+- **Built-in explorer JavaScript split into ES modules.** The former single
+  `app.js` bundle is now a small entrypoint that loads `core.js` (the reading
+  surface and try-it console) and `snippets.js` (request-snippet generation) as
+  native ES modules via `<script type="module">`. The asset route serves
+  `core.js` and `snippets.js` alongside `app.css` / `app.js`; there is still no
+  build step and the explorer behaves the same.
+- **Wrapped sidebar path labels.** Long endpoint paths in the explorer
+  navigation now clamp to two lines with a consistent row height instead of
+  breaking at arbitrary characters, keeping the virtualized sidebar aligned.
+
 ## [1.6.0] - 2026-07-02
 
 ### Added
@@ -271,7 +285,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (with a Scalar driver), Postman export, and the `documentator:generate`,
   `documentator:export` and `documentator:postman` commands.
 
-[Unreleased]: https://github.com/tsitsishvili/documentator/compare/v1.5.0...HEAD
+[Unreleased]: https://github.com/tsitsishvili/documentator/compare/v1.6.1...HEAD
+[1.6.1]: https://github.com/tsitsishvili/documentator/compare/v1.6.0...v1.6.1
+[1.6.0]: https://github.com/tsitsishvili/documentator/compare/v1.5.0...v1.6.0
 [1.5.0]: https://github.com/tsitsishvili/documentator/compare/v1.4.0...v1.5.0
 [1.4.0]: https://github.com/tsitsishvili/documentator/compare/v1.3.0...v1.4.0
 [1.3.0]: https://github.com/tsitsishvili/documentator/compare/v1.2.0...v1.3.0
