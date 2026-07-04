@@ -25,6 +25,6 @@
             authStorage: @json($authStorage),
         };
     </script>
-    <script src="{{ $jsUrl }}" defer></script>
+    <script type="module" src="{{ $jsUrl }}"></script>
 </body>
 </html>

@@ -34,6 +34,11 @@ There is no build step. Before opening a pull request, make sure **both
 `composer test` and `composer lint:test` pass**. Run `npm run test:browser` too
 when the built-in explorer, docs shell, or UI assets change.
 
+For a file-by-file map of where behavior lives, see
+[`docs/codebase-map.md`](docs/codebase-map.md). For the built-in explorer's
+frontend map, see
+[`docs/built-in-ui-code-map.md`](docs/built-in-ui-code-map.md).
+
 ## How the package is structured
 
 The flow is a linear pipeline:

@@ -3,19 +3,129 @@
   "info": {
     "title": "Acme Storefront API",
     "version": "2.4.0",
-    "description": "A sample document for previewing the built-in explorer."
+    "description": "A sample document for previewing the built-in explorer.\n\nIt intentionally includes varied endpoint shapes: auth, path/query/header/cookie params, JSON bodies, multipart uploads, response headers, examples, nullable fields, arrays, enums, deprecated operations, and nested schemas."
   },
   "servers": [
     { "url": "https://api.acme.test", "description": "Production" },
-    { "url": "http://localhost", "description": "Local" }
+    { "url": "https://sandbox.acme.test", "description": "Sandbox" },
+    { "url": "http://localhost:8000", "description": "Local" }
   ],
   "tags": [
-    { "name": "Orders" },
-    { "name": "Customers" }
+    { "name": "Orders", "description": "Checkout and order management." },
+    { "name": "Customers", "description": "Customer profiles, addresses, and loyalty data." },
+    { "name": "Catalog", "description": "Products, inventory, and reviews." },
+    { "name": "Billing", "description": "Payment methods, invoices, and refunds." },
+    { "name": "Files", "description": "Asset upload and export downloads." },
+    { "name": "Webhooks", "description": "Webhook subscriptions and delivery tests." },
+    { "name": "Admin", "description": "Administrative maintenance endpoints." }
   ],
   "components": {
     "securitySchemes": {
-      "default": { "type": "http", "scheme": "bearer", "description": "API token" }
+      "default": { "type": "http", "scheme": "bearer", "description": "Personal access token." },
+      "tenant": { "type": "apiKey", "in": "header", "name": "X-Tenant", "description": "Tenant routing key." },
+      "preview": { "type": "apiKey", "in": "query", "name": "preview_token", "description": "Temporary preview token." }
+    },
+    "schemas": {
+      "Money": {
+        "type": "object",
+        "required": ["amount", "currency"],
+        "properties": {
+          "amount": { "type": "integer", "example": 1299, "description": "Minor units." },
+          "currency": { "type": "string", "enum": ["USD", "EUR", "GBP"], "example": "USD" }
+        }
+      },
+      "Address": {
+        "type": "object",
+        "required": ["line1", "city", "country"],
+        "properties": {
+          "line1": { "type": "string", "example": "12 Market Street" },
+          "line2": { "type": ["string", "null"], "example": "Suite 4B" },
+          "city": { "type": "string", "example": "San Francisco" },
+          "postal_code": { "type": "string", "example": "94105" },
+          "country": { "type": "string", "minLength": 2, "maxLength": 2, "example": "US" }
+        }
+      },
+      "OrderItem": {
+        "type": "object",
+        "required": ["sku", "quantity"],
+        "properties": {
+          "sku": { "type": "string", "example": "SKU-1001" },
+          "quantity": { "type": "integer", "minimum": 1, "example": 2 },
+          "gift_wrap": { "type": "boolean", "example": false },
+          "metadata": {
+            "type": "object",
+            "additionalProperties": { "type": "string" },
+            "example": { "engraving": "Happy birthday" }
+          }
+        }
+      },
+      "Order": {
+        "type": "object",
+        "required": ["id", "reference", "status", "total", "items", "created_at"],
+        "properties": {
+          "id": { "type": "integer", "example": 42 },
+          "reference": { "type": "string", "example": "ORD-2026-0042" },
+          "status": { "type": "string", "enum": ["draft", "paid", "fulfilled", "refunded", "cancelled"], "example": "paid" },
+          "paid": { "type": "boolean", "example": true },
+          "total": { "$ref": "#/components/schemas/Money" },
+          "customer_id": { "type": "integer", "example": 1001 },
+          "items": { "type": "array", "items": { "$ref": "#/components/schemas/OrderItem" } },
+          "shipping_address": { "$ref": "#/components/schemas/Address" },
+          "created_at": { "type": "string", "format": "date-time", "example": "2026-07-02T12:30:00Z" },
+          "fulfilled_at": { "type": ["string", "null"], "format": "date-time", "example": null }
+        }
+      },
+      "Customer": {
+        "type": "object",
+        "required": ["id", "email", "name", "created_at"],
+        "properties": {
+          "id": { "type": "integer", "example": 1001 },
+          "email": { "type": "string", "format": "email", "example": "ada@example.test" },
+          "name": { "type": "string", "example": "Ada Lovelace" },
+          "phone": { "type": ["string", "null"], "example": "+1-555-0100" },
+          "vip": { "type": "boolean", "example": true },
+          "default_address": { "$ref": "#/components/schemas/Address" },
+          "created_at": { "type": "string", "format": "date-time", "example": "2026-01-15T09:10:00Z" }
+        }
+      },
+      "Product": {
+        "type": "object",
+        "required": ["id", "sku", "name", "price", "in_stock"],
+        "properties": {
+          "id": { "type": "integer", "example": 501 },
+          "sku": { "type": "string", "example": "SKU-1001" },
+          "name": { "type": "string", "example": "Canvas Tote" },
+          "description": { "type": "string", "example": "A durable everyday tote." },
+          "price": { "$ref": "#/components/schemas/Money" },
+          "in_stock": { "type": "boolean", "example": true },
+          "tags": { "type": "array", "items": { "type": "string" }, "example": ["bags", "summer"] }
+        }
+      },
+      "Pagination": {
+        "type": "object",
+        "required": ["page", "per_page", "total"],
+        "properties": {
+          "page": { "type": "integer", "example": 1 },
+          "per_page": { "type": "integer", "example": 25 },
+          "total": { "type": "integer", "example": 128 }
+        }
+      },
+      "Problem": {
+        "type": "object",
+        "required": ["message"],
+        "properties": {
+          "message": { "type": "string", "example": "The given data was invalid." },
+          "code": { "type": "string", "example": "validation_failed" },
+          "errors": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "array",
+              "items": { "type": "string" }
+            },
+            "example": { "items.0.sku": ["The selected sku is invalid."] }
+          }
+        }
+      }
     }
   },
   "paths": {
@@ -23,50 +133,79 @@
       "get": {
         "operationId": "ordersIndex",
         "tags": ["Orders"],
+        "x-documentator-section": "Storefront",
+        "x-documentator-group-version": "v2",
         "summary": "List orders",
-        "description": "Returns a **paginated** list of the authenticated customer's orders.\n\nFilter with these query parameters:\n\n- `status` — restrict by order status\n- `limit` — page size (max `100`)\n\nSee the [API guide](https://docs.acme.test) for pagination details.",
+        "description": "Returns a **paginated** list of orders.\n\nFilter with these query parameters:\n\n- `status` restricts by order status\n- `created_after` limits results by date\n- `include[]` expands related resources\n\nSee the [API guide](https://docs.acme.test) for pagination details.",
         "parameters": [
-          { "name": "status", "in": "query", "required": false, "schema": { "type": "string", "enum": ["paid", "pending", "refunded"] }, "description": "Filter by `status`." },
-          { "name": "limit", "in": "query", "required": false, "schema": { "type": "integer", "example": 25 } }
+          { "name": "status", "in": "query", "schema": { "type": "string", "enum": ["draft", "paid", "fulfilled", "refunded", "cancelled"] }, "description": "Filter by current order status." },
+          { "name": "include", "in": "query", "schema": { "type": "array", "items": { "type": "string", "enum": ["customer", "items", "payments"] } }, "description": "Relationships to include." },
+          { "name": "created_after", "in": "query", "schema": { "type": "string", "format": "date", "example": "2026-01-01" } },
+          { "name": "limit", "in": "query", "schema": { "type": "integer", "minimum": 1, "maximum": 100, "example": 25 } },
+          { "name": "X-Trace-Id", "in": "header", "schema": { "type": "string", "format": "uuid" }, "description": "Optional caller trace id." }
         ],
         "security": [{ "default": [] }],
         "responses": {
-          "200": { "description": "A page of orders" }
+          "200": {
+            "description": "A page of orders",
+            "headers": {
+              "X-Request-Id": { "description": "Server trace id.", "schema": { "type": "string", "format": "uuid" } },
+              "X-RateLimit-Remaining": { "description": "Requests left in the current window.", "schema": { "type": "integer", "example": 499 } }
+            },
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["data", "meta"],
+                  "properties": {
+                    "data": { "type": "array", "items": { "$ref": "#/components/schemas/Order" } },
+                    "meta": { "$ref": "#/components/schemas/Pagination" }
+                  }
+                }
+              }
+            }
+          },
+          "401": { "description": "Missing or invalid token", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Problem" } } } }
         }
       },
       "post": {
         "operationId": "ordersStore",
         "tags": ["Orders"],
+        "x-documentator-section": "Storefront",
+        "x-documentator-group-version": "v2",
         "summary": "Create an order",
-        "description": "Creates an order for the authenticated customer.",
+        "description": "Creates an order for a customer, optionally applying a coupon and shipping address override.",
         "security": [{ "default": [] }],
+        "parameters": [
+          { "name": "Idempotency-Key", "in": "header", "required": true, "schema": { "type": "string", "format": "uuid" }, "description": "Unique key for retry-safe order creation." }
+        ],
         "requestBody": {
           "required": true,
           "content": {
             "application/json": {
               "schema": {
                 "type": "object",
-                "required": ["items"],
+                "required": ["customer_id", "items"],
                 "properties": {
-                  "coupon": { "type": "string", "description": "Optional promo code." },
-                  "items": {
-                    "type": "array",
-                    "items": {
-                      "type": "object",
-                      "properties": {
-                        "sku": { "type": "string" },
-                        "quantity": { "type": "integer", "example": 1 }
-                      }
-                    }
-                  }
+                  "customer_id": { "type": "integer", "example": 1001 },
+                  "coupon": { "type": ["string", "null"], "description": "Optional promo code.", "example": "SUMMER26" },
+                  "items": { "type": "array", "items": { "$ref": "#/components/schemas/OrderItem" } },
+                  "shipping_address": { "$ref": "#/components/schemas/Address" },
+                  "notes": { "type": "string", "maxLength": 500, "example": "Leave at front desk." }
                 }
+              },
+              "example": {
+                "customer_id": 1001,
+                "coupon": "SUMMER26",
+                "items": [{ "sku": "SKU-1001", "quantity": 2 }],
+                "notes": "Leave at front desk."
               }
             }
           }
         },
         "responses": {
-          "201": { "description": "Order created", "content": { "application/json": { "schema": { "type": "object", "properties": { "id": { "type": "integer" }, "reference": { "type": "string" } } } } } },
-          "422": { "description": "Validation failed" }
+          "201": { "description": "Order created", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Order" } } } },
+          "422": { "description": "Validation failed", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Problem" } } } }
         }
       }
     },
@@ -74,39 +213,139 @@
       "get": {
         "operationId": "ordersShow",
         "tags": ["Orders"],
+        "x-documentator-section": "Storefront",
+        "x-documentator-group-version": "v2",
         "summary": "Get an order",
         "parameters": [
-          { "name": "order", "in": "path", "required": true, "schema": { "type": "integer" } }
+          { "name": "order", "in": "path", "required": true, "schema": { "type": "integer", "example": 42 } },
+          { "name": "expand", "in": "query", "schema": { "type": "array", "items": { "type": "string", "enum": ["customer", "timeline"] } } }
         ],
         "security": [{ "default": [] }],
         "responses": {
+          "200": { "description": "The order", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Order" } } } },
+          "404": { "description": "Order not found", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Problem" } } } }
+        }
+      },
+      "patch": {
+        "operationId": "ordersUpdateStatus",
+        "tags": ["Orders"],
+        "x-documentator-section": "Storefront",
+        "x-documentator-group-version": "v2",
+        "summary": "Update order status",
+        "parameters": [
+          { "name": "order", "in": "path", "required": true, "schema": { "type": "integer", "example": 42 } }
+        ],
+        "security": [{ "default": [] }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["status"],
+                "properties": {
+                  "status": { "type": "string", "enum": ["fulfilled", "cancelled", "refunded"], "example": "fulfilled" },
+                  "notify_customer": { "type": "boolean", "example": true },
+                  "reason": { "type": ["string", "null"], "example": null }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Updated order", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Order" } } } },
+          "409": { "description": "Invalid transition", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Problem" } } } }
+        }
+      }
+    },
+    "/api/orders/{order}/refunds": {
+      "post": {
+        "operationId": "ordersRefund",
+        "tags": ["Billing"],
+        "x-documentator-section": "Storefront",
+        "summary": "Refund an order",
+        "parameters": [
+          { "name": "order", "in": "path", "required": true, "schema": { "type": "integer", "example": 42 } }
+        ],
+        "security": [{ "default": [] }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["amount", "reason"],
+                "properties": {
+                  "amount": { "$ref": "#/components/schemas/Money" },
+                  "reason": { "type": "string", "enum": ["duplicate", "fraudulent", "requested_by_customer"], "example": "requested_by_customer" },
+                  "line_items": { "type": "array", "items": { "type": "integer" }, "example": [8801, 8802] }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": { "description": "Refund queued", "content": { "application/json": { "example": { "id": "rf_123", "status": "pending" } } } }
+        }
+      }
+    },
+    "/api/customers": {
+      "get": {
+        "operationId": "customersIndex",
+        "tags": ["Customers"],
+        "x-documentator-section": "Storefront",
+        "summary": "Search customers",
+        "parameters": [
+          { "name": "q", "in": "query", "schema": { "type": "string", "example": "ada" } },
+          { "name": "vip", "in": "query", "schema": { "type": "boolean" } },
+          { "name": "created_before", "in": "query", "schema": { "type": "string", "format": "date" } },
+          { "name": "preview_session", "in": "cookie", "schema": { "type": "string" }, "description": "Optional preview cookie." }
+        ],
+        "security": [{ "tenant": [] }],
+        "responses": {
           "200": {
-            "description": "The order",
+            "description": "Matching customers",
             "content": {
               "application/json": {
                 "schema": {
                   "type": "object",
                   "properties": {
-                    "id": { "type": "integer" },
-                    "reference": { "type": "string" },
-                    "paid": { "type": "boolean" },
-                    "created_at": { "type": "string", "format": "date-time" },
-                    "items": {
-                      "type": "array",
-                      "items": {
-                        "type": "object",
-                        "properties": {
-                          "sku": { "type": "string" },
-                          "quantity": { "type": "integer" }
-                        }
-                      }
-                    }
+                    "data": { "type": "array", "items": { "$ref": "#/components/schemas/Customer" } },
+                    "meta": { "$ref": "#/components/schemas/Pagination" }
                   }
                 }
               }
             }
-          },
-          "404": { "description": "Order not found" }
+          }
+        }
+      },
+      "post": {
+        "operationId": "customersStore",
+        "tags": ["Customers"],
+        "x-documentator-section": "Storefront",
+        "summary": "Create customer",
+        "security": [{ "tenant": [] }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["email", "name"],
+                "properties": {
+                  "email": { "type": "string", "format": "email", "example": "ada@example.test" },
+                  "name": { "type": "string", "example": "Ada Lovelace" },
+                  "phone": { "type": ["string", "null"], "example": null },
+                  "default_address": { "$ref": "#/components/schemas/Address" },
+                  "tags": { "type": "array", "items": { "type": "string" }, "example": ["vip", "newsletter"] }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": { "description": "Customer created", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Customer" } } } },
+          "422": { "description": "Validation failed", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Problem" } } } }
         }
       }
     },
@@ -114,12 +353,295 @@
       "get": {
         "operationId": "customersShow",
         "tags": ["Customers"],
+        "x-documentator-section": "Storefront",
         "summary": "Get a customer",
         "parameters": [
-          { "name": "customer", "in": "path", "required": true, "schema": { "type": "integer" } }
+          { "name": "customer", "in": "path", "required": true, "schema": { "type": "integer", "example": 1001 } }
+        ],
+        "security": [{ "tenant": [] }],
+        "responses": {
+          "200": { "description": "The customer", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Customer" } } } },
+          "404": { "description": "Customer not found", "content": { "application/json": { "schema": { "$ref": "#/components/schemas/Problem" } } } }
+        }
+      }
+    },
+    "/api/products": {
+      "get": {
+        "operationId": "productsIndex",
+        "tags": ["Catalog"],
+        "x-documentator-section": "Storefront",
+        "summary": "List products",
+        "description": "Public product search with arrays, enums, and numeric range filters.",
+        "parameters": [
+          { "name": "search", "in": "query", "schema": { "type": "string", "example": "tote" } },
+          { "name": "category", "in": "query", "schema": { "type": "array", "items": { "type": "string" }, "example": ["bags", "accessories"] } },
+          { "name": "min_price", "in": "query", "schema": { "type": "integer", "example": 1000 } },
+          { "name": "max_price", "in": "query", "schema": { "type": "integer", "example": 5000 } },
+          { "name": "sort", "in": "query", "schema": { "type": "string", "enum": ["name", "-name", "price", "-price", "created_at", "-created_at"] } }
         ],
         "responses": {
-          "200": { "description": "The customer" }
+          "200": {
+            "description": "Products",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": { "type": "array", "items": { "$ref": "#/components/schemas/Product" } },
+                    "meta": { "$ref": "#/components/schemas/Pagination" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/products/{product}/reviews": {
+      "post": {
+        "operationId": "productReviewsStore",
+        "tags": ["Catalog"],
+        "x-documentator-section": "Storefront",
+        "summary": "Create product review",
+        "parameters": [
+          { "name": "product", "in": "path", "required": true, "schema": { "type": "integer", "example": 501 } }
+        ],
+        "security": [{ "default": [] }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["rating", "body"],
+                "properties": {
+                  "rating": { "type": "integer", "minimum": 1, "maximum": 5, "example": 5 },
+                  "title": { "type": "string", "example": "Exactly what I needed" },
+                  "body": { "type": "string", "example": "Sturdy fabric and fast shipping." },
+                  "photos": { "type": "array", "items": { "type": "string", "format": "uri" } }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": { "description": "Review created", "content": { "application/json": { "example": { "id": 77, "status": "pending_moderation" } } } }
+        }
+      }
+    },
+    "/api/files/assets": {
+      "post": {
+        "operationId": "assetsUpload",
+        "tags": ["Files"],
+        "x-documentator-section": "Back Office",
+        "summary": "Upload assets",
+        "description": "Multipart upload with files and scalar fields.",
+        "security": [{ "default": [] }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "required": ["folder", "files"],
+                "properties": {
+                  "folder": { "type": "string", "enum": ["products", "avatars", "exports"], "example": "products" },
+                  "public": { "type": "boolean", "example": true },
+                  "files": { "type": "array", "items": { "type": "string", "format": "binary" } },
+                  "alt_text": { "type": "string", "example": "Canvas tote product photo" }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Assets uploaded",
+            "content": {
+              "application/json": {
+                "example": {
+                  "data": [
+                    { "id": "asset_1", "url": "https://cdn.acme.test/products/tote.jpg" }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/files/exports/{export}": {
+      "get": {
+        "operationId": "exportsDownload",
+        "tags": ["Files"],
+        "x-documentator-section": "Back Office",
+        "summary": "Download export",
+        "parameters": [
+          { "name": "export", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } }
+        ],
+        "security": [{ "default": [] }],
+        "responses": {
+          "200": {
+            "description": "CSV export",
+            "headers": {
+              "Content-Disposition": { "description": "Suggested filename.", "schema": { "type": "string", "example": "attachment; filename=orders.csv" } }
+            },
+            "content": {
+              "text/csv": {
+                "schema": { "type": "string", "format": "binary" }
+              }
+            }
+          },
+          "404": { "description": "Export not found" }
+        }
+      }
+    },
+    "/api/billing/payment-methods": {
+      "post": {
+        "operationId": "paymentMethodsStore",
+        "tags": ["Billing"],
+        "x-documentator-section": "Storefront",
+        "summary": "Attach payment method",
+        "security": [{ "default": [] }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "required": ["type", "token"],
+                    "properties": {
+                      "type": { "type": "string", "enum": ["card"] },
+                      "token": { "type": "string", "example": "tok_visa" },
+                      "set_default": { "type": "boolean", "example": true }
+                    }
+                  },
+                  {
+                    "type": "object",
+                    "required": ["type", "email"],
+                    "properties": {
+                      "type": { "type": "string", "enum": ["paypal"] },
+                      "email": { "type": "string", "format": "email", "example": "billing@example.test" }
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": { "description": "Payment method attached", "content": { "application/json": { "example": { "id": "pm_123", "type": "card", "default": true } } } }
+        }
+      }
+    },
+    "/api/webhooks": {
+      "get": {
+        "operationId": "webhooksIndex",
+        "tags": ["Webhooks"],
+        "x-documentator-section": "Back Office",
+        "summary": "List webhooks",
+        "security": [{ "default": [] }],
+        "responses": {
+          "200": {
+            "description": "Webhook subscriptions",
+            "content": {
+              "application/json": {
+                "example": {
+                  "data": [
+                    { "id": "wh_123", "url": "https://example.test/hooks/acme", "events": ["order.created"], "active": true }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "operationId": "webhooksStore",
+        "tags": ["Webhooks"],
+        "x-documentator-section": "Back Office",
+        "summary": "Create webhook",
+        "security": [{ "default": [] }],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["url", "events"],
+                "properties": {
+                  "url": { "type": "string", "format": "uri", "example": "https://example.test/hooks/acme" },
+                  "events": {
+                    "type": "array",
+                    "items": { "type": "string", "enum": ["order.created", "order.refunded", "customer.created", "product.updated"] },
+                    "example": ["order.created", "order.refunded"]
+                  },
+                  "secret": { "type": ["string", "null"], "example": "whsec_123" },
+                  "active": { "type": "boolean", "example": true }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": { "description": "Webhook created" }
+        }
+      }
+    },
+    "/api/webhooks/{webhook}/test": {
+      "post": {
+        "operationId": "webhooksTest",
+        "tags": ["Webhooks"],
+        "x-documentator-section": "Back Office",
+        "summary": "Send test webhook",
+        "parameters": [
+          { "name": "webhook", "in": "path", "required": true, "schema": { "type": "string", "example": "wh_123" } }
+        ],
+        "security": [{ "default": [] }],
+        "responses": {
+          "202": { "description": "Test delivery queued", "content": { "application/json": { "example": { "delivery_id": "dlv_123", "status": "queued" } } } }
+        }
+      }
+    },
+    "/api/admin/cache": {
+      "delete": {
+        "operationId": "adminCacheFlush",
+        "tags": ["Admin"],
+        "x-documentator-section": "Back Office",
+        "summary": "Flush cache",
+        "description": "Administrative endpoint with a DELETE body and query API key auth.",
+        "security": [{ "preview": [] }],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "scope": { "type": "string", "enum": ["all", "catalog", "orders"], "example": "catalog" },
+                  "dry_run": { "type": "boolean", "example": false }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "202": { "description": "Cache flush accepted", "content": { "application/json": { "example": { "job_id": "job_123", "scope": "catalog" } } } }
+        }
+      }
+    },
+    "/api/admin/legacy-report": {
+      "get": {
+        "operationId": "adminLegacyReport",
+        "tags": ["Admin"],
+        "x-documentator-section": "Back Office",
+        "summary": "Legacy report",
+        "description": "Deprecated example endpoint kept to preview visual treatment.",
+        "deprecated": true,
+        "security": [{ "default": [] }],
+        "responses": {
+          "200": { "description": "Legacy report payload", "content": { "application/json": { "example": { "message": "Use /api/files/exports instead." } } } }
         }
       }
     }

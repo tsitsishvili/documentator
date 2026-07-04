@@ -112,7 +112,7 @@ final class DocumentatorServiceProvider extends ServiceProvider
                 ->where('section', '[A-Za-z0-9_-]+')
                 ->name('documentator.openapi.section');
             $router->get('/assets/{asset}', [AssetController::class, 'show'])
-                ->where('asset', 'app\.(css|js)')
+                ->where('asset', '(app\.css|app\.js|core\.js|snippets\.js)')
                 ->name('documentator.asset');
             $router->get('/{section}', [DocsController::class, 'index'])
                 ->where('section', '[A-Za-z0-9_-]+')

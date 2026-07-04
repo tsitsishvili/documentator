@@ -14,7 +14,9 @@ final class AssetController
 {
     private const ASSETS = [
         'app.css' => 'text/css; charset=utf-8',
+        'core.js' => 'text/javascript; charset=utf-8',
         'app.js' => 'text/javascript; charset=utf-8',
+        'snippets.js' => 'text/javascript; charset=utf-8',
     ];
 
     public function show(string $asset): Response

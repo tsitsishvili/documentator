@@ -37,17 +37,31 @@ it('serves the built-in CSS and JS assets', function () {
     $this->get('/docs/assets/app.js')
         ->assertOk()
         ->assertHeader('Content-Type', 'text/javascript; charset=utf-8');
+
+    $this->get('/docs/assets/core.js')
+        ->assertOk()
+        ->assertHeader('Content-Type', 'text/javascript; charset=utf-8');
+
+    $this->get('/docs/assets/snippets.js')
+        ->assertOk()
+        ->assertHeader('Content-Type', 'text/javascript; charset=utf-8');
 });
 
 it('ships persistent filters and virtualized sidebar assets', function () {
-    $js = $this->get('/docs/assets/app.js')
+    $entry = $this->get('/docs/assets/app.js')
+        ->assertOk()
+        ->getContent();
+    $core = $this->get('/docs/assets/core.js')
         ->assertOk()
         ->getContent();
     $css = $this->get('/docs/assets/app.css')
         ->assertOk()
         ->getContent();
 
-    expect($js)
+    expect($entry)
+        ->toContain('core.js')
+        ->toContain('snippets.js')
+        ->and($core)
         ->toContain('collapsedGroups')
         ->toContain("store.set('method'")
         ->toContain('renderVirtualNav')
