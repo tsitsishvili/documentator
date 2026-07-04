@@ -18,6 +18,7 @@ final class OpenApiValidator
     public static function validate(array $spec): array
     {
         $errors = [];
+        $operationIds = [];
 
         if (($spec['openapi'] ?? null) !== '3.1.0') {
             $errors[] = 'openapi must be 3.1.0';
@@ -44,7 +45,8 @@ final class OpenApiValidator
                 continue;
             }
 
-            $errors = array_merge($errors, self::validatePathItem($spec, $path, $pathItem));
+            $pathErrors = self::validatePathItem($spec, $path, $pathItem, $operationIds);
+            $errors = array_merge($errors, $pathErrors);
         }
 
         return $errors;
@@ -55,10 +57,11 @@ final class OpenApiValidator
      * @param  array<string, mixed>  $pathItem
      * @return array<int, string>
      */
-    private static function validatePathItem(array $spec, string $path, array $pathItem): array
+    private static function validatePathItem(array $spec, string $path, array $pathItem, array &$operationIds): array
     {
         $errors = [];
         $verbs = ['get', 'post', 'put', 'patch', 'delete', 'options', 'head'];
+        $templateParameters = self::pathTemplateParameters($path);
 
         foreach ($pathItem as $verb => $operation) {
             if (! in_array($verb, $verbs, true)) {
@@ -75,6 +78,18 @@ final class OpenApiValidator
                 $errors[] = strtoupper((string) $verb)." {$path} must define responses";
             }
 
+            if (is_string($operation['operationId'] ?? null) && $operation['operationId'] !== '') {
+                $operationId = $operation['operationId'];
+
+                if (isset($operationIds[$operationId])) {
+                    $errors[] = "duplicate operationId {$operationId} on ".strtoupper((string) $verb)." {$path}";
+                }
+
+                $operationIds[$operationId] = true;
+            }
+
+            $definedPathParameters = [];
+
             foreach ($operation['parameters'] ?? [] as $parameter) {
                 if (! is_array($parameter)) {
                     $errors[] = strtoupper((string) $verb)." {$path} parameter must be an object";
@@ -90,8 +105,28 @@ final class OpenApiValidator
                     $errors[] = strtoupper((string) $verb)." {$path} path parameter {$parameter['name']} must be required";
                 }
 
+                if (($parameter['in'] ?? null) === 'path' && is_string($parameter['name'] ?? null)) {
+                    $definedPathParameters[$parameter['name']] = true;
+                }
+
                 if (is_array($parameter['schema'] ?? null)) {
                     $errors = array_merge($errors, self::validateSchema($spec, "{$verb} {$path} parameter {$parameter['name']}", $parameter['schema']));
+                }
+            }
+
+            foreach ($templateParameters as $name) {
+                if (! self::validPathParameterName($name)) {
+                    $errors[] = strtoupper((string) $verb)." {$path} path template parameter {$name} is not a valid OpenAPI parameter name";
+                }
+
+                if (! isset($definedPathParameters[$name])) {
+                    $errors[] = strtoupper((string) $verb)." {$path} is missing path parameter {$name}";
+                }
+            }
+
+            foreach (array_keys($definedPathParameters) as $name) {
+                if (! in_array($name, $templateParameters, true)) {
+                    $errors[] = strtoupper((string) $verb)." {$path} defines path parameter {$name} that is not present in the path template";
                 }
             }
 
@@ -111,6 +146,21 @@ final class OpenApiValidator
         }
 
         return $errors;
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private static function pathTemplateParameters(string $path): array
+    {
+        preg_match_all('/\{([^}]+)\}/', $path, $matches);
+
+        return array_values(array_unique($matches[1]));
+    }
+
+    private static function validPathParameterName(string $name): bool
+    {
+        return preg_match('/^[A-Za-z0-9_.-]+$/', $name) === 1;
     }
 
     /**

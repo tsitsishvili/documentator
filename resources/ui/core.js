@@ -1579,6 +1579,23 @@ export function start(deps) {
         }
     }
 
+    function appendMultipartField(fields, name, value) {
+        if (Array.isArray(value)) {
+            value.forEach(function (item, index) {
+                appendMultipartField(fields, name + '[' + index + ']', item);
+            });
+            return;
+        }
+        if (value && typeof value === 'object') {
+            Object.keys(value).forEach(function (key) {
+                appendMultipartField(fields, name + '[' + key + ']', value[key]);
+            });
+            return;
+        }
+
+        fields.push({ name: name, value: value === null ? '' : String(value) });
+    }
+
     /* Read the body fields into a normalized shape the senders/snippets understand:
        { mode: 'none' | 'json' | 'raw' | 'multipart', ... }. */
     function readBody(form, content) {
@@ -1615,10 +1632,14 @@ export function start(deps) {
                 json[name] = val;
             }
             hasJson = true;
-            fields.push({
-                name: input.dataset.array === 'true' ? queryArrayName(name) : name,
-                value: typeof val === 'string' ? val : JSON.stringify(val),
-            });
+            if (multipart) {
+                appendMultipartField(fields, input.dataset.array === 'true' ? queryArrayName(name) : name, val);
+            } else {
+                fields.push({
+                    name: input.dataset.array === 'true' ? queryArrayName(name) : name,
+                    value: typeof val === 'string' ? val : JSON.stringify(val),
+                });
+            }
         });
 
         if (multipart) return { mode: 'multipart', fields: fields, files: files };
@@ -1714,6 +1735,21 @@ export function start(deps) {
 
     /* ---------- send ---------- */
 
+    function applyBrowserCookies(url, cookieHeader) {
+        if (!cookieHeader) return false;
+
+        var target;
+        try { target = new URL(url, location.href); } catch (e) { return false; }
+        if (target.origin !== location.origin) return false;
+
+        cookieHeader.split(';').forEach(function (pair) {
+            pair = pair.trim();
+            if (pair) document.cookie = pair + '; Path=/; SameSite=Lax';
+        });
+
+        return true;
+    }
+
     function send() {
         var req = readForm();
         var btn = document.getElementById('send');
@@ -1734,6 +1770,11 @@ export function start(deps) {
 
         var options = { method: req.method.toUpperCase(), headers: {} };
         Object.keys(req.headers).forEach(function (k) { options.headers[k] = req.headers[k]; });
+        if (options.headers.Cookie) {
+            applyBrowserCookies(req.url, options.headers.Cookie);
+            delete options.headers.Cookie;
+            options.credentials = 'include';
+        }
 
         var b = req.body;
         if (b.mode === 'json') {

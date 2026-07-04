@@ -33,6 +33,11 @@ final class SchemaSampler
             }
         }
 
+        if (is_array($schema['type'] ?? null)) {
+            $types = array_values(array_filter($schema['type'], fn (mixed $type): bool => $type !== 'null'));
+            $schema['type'] = $types[0] ?? 'null';
+        }
+
         return match ($schema['type'] ?? null) {
             'object' => self::object($schema, $depth),
             'array' => array_fill(0, max(1, (int) ($schema['minItems'] ?? 1)), self::sample($schema['items'] ?? [], $depth + 1, $name)),

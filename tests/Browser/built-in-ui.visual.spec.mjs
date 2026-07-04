@@ -48,7 +48,68 @@ function spec(count = 650) {
   };
 }
 
-async function mount(page) {
+function multipartSpec() {
+  return {
+    openapi: '3.1.0',
+    info: { title: 'Upload API', version: '1.0.0' },
+    servers: [{ url: 'http://documentator.test' }],
+    paths: {
+      '/api/uploads': {
+        post: {
+          operationId: 'uploadAvatar',
+          tags: ['Uploads'],
+          summary: 'Upload avatar',
+          requestBody: {
+            content: {
+              'multipart/form-data': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    avatar: { type: 'string', format: 'binary' },
+                    items: {
+                      type: 'array',
+                      items: {
+                        type: 'object',
+                        properties: {
+                          sku: { type: 'string' },
+                          qty: { type: 'integer' },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          responses: { 200: { description: 'OK' } },
+        },
+      },
+    },
+  };
+}
+
+function cookieSpec() {
+  return {
+    openapi: '3.1.0',
+    info: { title: 'Cookie API', version: '1.0.0' },
+    servers: [{ url: 'http://documentator.test' }],
+    paths: {
+      '/api/cookie': {
+        get: {
+          operationId: 'cookieCheck',
+          tags: ['Auth'],
+          summary: 'Cookie check',
+          parameters: [
+            { name: 'session_id', in: 'cookie', schema: { type: 'string' } },
+          ],
+          responses: { 200: { description: 'OK' } },
+        },
+      },
+    },
+  };
+}
+
+async function mount(page, openapi = spec()) {
   const [css, js, core, snippets] = await Promise.all([
     readFile(resolve(root, 'resources/ui/app.css'), 'utf8'),
     readFile(resolve(root, 'resources/ui/app.js'), 'utf8'),
@@ -58,7 +119,7 @@ async function mount(page) {
 
   await page.route('http://documentator.test/docs/openapi.json', route => route.fulfill({
     contentType: 'application/json',
-    body: JSON.stringify(spec()),
+    body: JSON.stringify(openapi),
   }));
   await page.route('http://documentator.test/docs/assets/app.css', route => route.fulfill({
     contentType: 'text/css',
@@ -157,4 +218,30 @@ test('mobile layout exposes the sidebar without overlapping the document', async
   expect(sidebar.width).toBeGreaterThan(250);
   expect(doc.width).toBeGreaterThan(0);
   expect((await page.locator('#app').screenshot()).length).toBeGreaterThan(20000);
+});
+
+test('multipart snippets use Laravel-compatible bracket field names for nested values', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 860 });
+  await mount(page, multipartSpec());
+  await page.locator('.nav-item').first().click();
+
+  await expect(page.locator('#snippetCode')).toContainText('items[0][sku]=string');
+  await expect(page.locator('#snippetCode')).toContainText('items[0][qty]=0');
+});
+
+test('cookie parameters are applied through browser cookies on same-origin requests', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 860 });
+  let cookieHeader = '';
+
+  await page.route('http://documentator.test/api/cookie', route => {
+    cookieHeader = route.request().headers().cookie || '';
+    return route.fulfill({ contentType: 'application/json', body: '{"ok":true}' });
+  });
+
+  await mount(page, cookieSpec());
+  await page.locator('.nav-item').first().click();
+  await page.locator('[data-kind="cookie"][data-name="session_id"]').fill('abc123');
+  await page.locator('#send').click();
+
+  await expect.poll(() => cookieHeader).toContain('session_id=abc123');
 });

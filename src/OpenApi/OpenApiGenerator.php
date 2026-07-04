@@ -25,6 +25,9 @@ final class OpenApiGenerator
     /** @var array<string, array<string, mixed>> */
     private array $componentSchemas = [];
 
+    /** @var array<string, int> */
+    private array $operationIds = [];
+
     /**
      * @param  array<int, EndpointData>  $endpoints
      * @return array<string, mixed>
@@ -34,6 +37,7 @@ final class OpenApiGenerator
         $this->componentCounts = $this->componentCounts($endpoints);
         $this->componentNames = [];
         $this->componentSchemas = [];
+        $this->operationIds = [];
 
         $paths = [];
         $tags = [];
@@ -134,7 +138,7 @@ final class OpenApiGenerator
     private function operation(EndpointData $endpoint, string $tag, ?string $globalScheme = null): array
     {
         $operation = array_filter([
-            'operationId' => $endpoint->operationId(),
+            'operationId' => $this->operationId($endpoint),
             'tags' => [$tag],
             'summary' => $endpoint->summary,
             'description' => $endpoint->description,
@@ -157,6 +161,15 @@ final class OpenApiGenerator
         }
 
         return $operation;
+    }
+
+    private function operationId(EndpointData $endpoint): string
+    {
+        $base = $endpoint->operationId();
+        $count = $this->operationIds[$base] ?? 0;
+        $this->operationIds[$base] = $count + 1;
+
+        return $count === 0 ? $base : $base.($count + 1);
     }
 
     /**
@@ -326,15 +339,22 @@ final class OpenApiGenerator
         $body = ['description' => $description];
 
         $mediaType = $response->mediaType ?? 'application/json';
+        $content = [];
+
+        if ($response->schema !== null) {
+            $content['schema'] = $this->responseSchema($response);
+        } elseif ($response->type !== null && ($typeSchema = TypeStringParser::parse($response->type)) !== null) {
+            $content['schema'] = $this->normalizeSchema($typeSchema);
+        } elseif ($response->resource !== null) {
+            $content['schema'] = ['type' => 'object'];
+        }
 
         if ($response->example !== null) {
-            $body['content'] = [$mediaType => ['example' => $response->example]];
-        } elseif ($response->schema !== null) {
-            $body['content'] = [$mediaType => ['schema' => $this->responseSchema($response)]];
-        } elseif ($response->type !== null && ($typeSchema = TypeStringParser::parse($response->type)) !== null) {
-            $body['content'] = [$mediaType => ['schema' => $this->normalizeSchema($typeSchema)]];
-        } elseif ($response->resource !== null) {
-            $body['content'] = [$mediaType => ['schema' => ['type' => 'object']]];
+            $content['example'] = $response->example;
+        }
+
+        if ($content !== []) {
+            $body['content'] = [$mediaType => $content];
         }
 
         if ($response->headers !== []) {
@@ -514,8 +534,11 @@ final class OpenApiGenerator
 
     private function normalizePath(string $uri): string
     {
-        // Laravel optional params ({id?}) aren't valid OpenAPI path templates.
-        return '/'.ltrim(str_replace('?}', '}', $uri), '/');
+        // Laravel optional params ({id?}) and binding fields ({post:slug})
+        // aren't valid OpenAPI path templates.
+        $path = (string) preg_replace('/\{(\w+)(?::[^}?]+)?\??\}/', '{$1}', $uri);
+
+        return '/'.ltrim($path, '/');
     }
 
     private function sectionFor(EndpointData $endpoint): ?string

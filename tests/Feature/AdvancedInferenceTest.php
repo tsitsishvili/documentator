@@ -75,6 +75,12 @@ class AdvancedInferenceController
         return new AdvancedInvoiceResource([]);
     }
 
+    #[Response(200, type: 'array{id: int, status: string}', example: ['id' => 10, 'status' => 'queued'])]
+    public function responseExampleAndType(): void
+    {
+        //
+    }
+
     public function queryBuilder(): void
     {
         $filters = ['name', AllowedFilter::exact('id'), AllowedFilter::exact('published')->ignore('all')];
@@ -137,6 +143,17 @@ it('emits operation, header, media type, response header, and schema name attrib
         ->and($operation['responses']['202']['content']['application/json']['schema']['properties']['status']['type'])->toBe('string')
         ->and($operation['responses']['202']['content']['application/json']['schema']['required'])->not->toContain('status')
         ->and($operation['responses']['202']['content']['application/json']['schema']['properties']['meta']['properties']['queued_at']['type'])->toBe(['string', 'null']);
+});
+
+it('keeps response schemas when an explicit example is also provided', function () {
+    Route::get('api/advanced/example-schema', [AdvancedInferenceController::class, 'responseExampleAndType']);
+
+    $media = app(Documentator::class)
+        ->toOpenApi()['paths']['/api/advanced/example-schema']['get']['responses']['200']['content']['application/json'];
+
+    expect($media['example'])->toBe(['id' => 10, 'status' => 'queued'])
+        ->and($media['schema']['properties']['id']['type'])->toBe('integer')
+        ->and($media['schema']['properties']['status']['type'])->toBe('string');
 });
 
 it('infers Spatie Query Builder filter, sort, include, and field query parameters from literal allowed calls', function () {
