@@ -137,7 +137,7 @@ final class ExtractRouteMetadata implements ExtractionStrategy
      */
     private function pathParameters(string $uri): array
     {
-        preg_match_all('/\{(\w+?)(\?)?\}/', $uri, $matches, PREG_SET_ORDER);
+        preg_match_all('/\{(\w+)(?::[^}?]+)?(\?)?\}/', $uri, $matches, PREG_SET_ORDER);
 
         $params = [];
 

@@ -106,6 +106,28 @@ it('types an implicitly model-bound path parameter from the model key', function
         ->and($param['schema']['type'])->toBe('integer');
 });
 
+it('normalizes custom Laravel route binding fields in OpenAPI paths', function () {
+    Route::get('api/products/{product:slug}', [AccuracyController::class, 'bound']);
+
+    $paths = app(Documentator::class)->toOpenApi()['paths'];
+    $param = $paths['/api/products/{product}']['get']['parameters'][0];
+
+    expect($paths)->toHaveKey('/api/products/{product}')
+        ->and($paths)->not->toHaveKey('/api/products/{product:slug}')
+        ->and($param['name'])->toBe('product')
+        ->and($param['schema']['type'])->toBe('string');
+});
+
+it('keeps generated operation ids unique when routes share a controller action', function () {
+    Route::get('api/things/{id}', [AccuracyController::class, 'show']);
+    Route::get('api/widgets/{id}', [AccuracyController::class, 'show']);
+
+    $paths = app(Documentator::class)->toOpenApi()['paths'];
+
+    expect($paths['/api/things/{id}']['get']['operationId'])
+        ->not->toBe($paths['/api/widgets/{id}']['get']['operationId']);
+});
+
 it('infers a response schema from a Model return type using its casts', function () {
     Route::get('api/fetch', [AccuracyController::class, 'fetch']);
 

@@ -28,6 +28,7 @@ class ExampleRequest extends FormRequest
         return [
             'email' => 'required|email',
             'age' => 'required|integer|min:21',
+            'score' => 'nullable|integer|min:5',
         ];
     }
 }
@@ -63,7 +64,8 @@ it('generates format-aware examples for the request body', function () {
     $example = $body['content']['application/json']['example'];
 
     expect($example['email'])->toBe('user@example.com')
-        ->and($example['age'])->toBe(21); // honours the min bound
+        ->and($example['age'])->toBe(21) // honours the min bound
+        ->and($example['score'])->toBe(5); // samples the non-null side of OpenAPI 3.1 unions
 });
 
 it('omits generated examples when disabled', function () {

@@ -64,3 +64,38 @@ it('reports invalid refs and legacy nullable schemas', function () {
         'get /api/broken response 200 application/json has an unresolved ref #/components/schemas/Missing',
     );
 });
+
+it('reports path parameter mismatches and duplicate operation ids', function () {
+    $spec = [
+        'openapi' => '3.1.0',
+        'info' => ['title' => 'API', 'version' => '1.0.0'],
+        'paths' => [
+            '/api/posts/{post:slug}' => [
+                'get' => [
+                    'operationId' => 'showPost',
+                    'parameters' => [],
+                    'responses' => ['200' => ['description' => 'ok']],
+                ],
+            ],
+            '/api/articles/{article}' => [
+                'get' => [
+                    'operationId' => 'showPost',
+                    'parameters' => [
+                        ['name' => 'unused', 'in' => 'path', 'required' => true, 'schema' => ['type' => 'string']],
+                    ],
+                    'responses' => ['200' => ['description' => 'ok']],
+                ],
+            ],
+        ],
+    ];
+
+    $errors = OpenApiValidator::validate($spec);
+
+    expect($errors)->toContain(
+        'GET /api/posts/{post:slug} path template parameter post:slug is not a valid OpenAPI parameter name',
+        'GET /api/posts/{post:slug} is missing path parameter post:slug',
+        'GET /api/articles/{article} is missing path parameter article',
+        'GET /api/articles/{article} defines path parameter unused that is not present in the path template',
+        'duplicate operationId showPost on GET /api/articles/{article}',
+    );
+});

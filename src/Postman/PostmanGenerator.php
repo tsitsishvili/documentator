@@ -26,7 +26,9 @@ final class PostmanGenerator
         $servers = $openapi['servers'] ?? [];
         $baseUrl = $servers[0]['url'] ?? 'http://localhost';
         $rootSecurity = $openapi['security'] ?? [];
-        $securitySchemes = $openapi['components']['securitySchemes'] ?? [];
+        // components.securitySchemes is emitted as a stdClass (so an empty map
+        // serializes to `{}`); cast back to an array for the array-typed helpers.
+        $securitySchemes = (array) ($openapi['components']['securitySchemes'] ?? []);
 
         $folders = [];
         foreach ($openapi['paths'] ?? [] as $path => $operations) {
@@ -100,6 +102,11 @@ final class PostmanGenerator
                 'raw' => json_encode(SchemaSampler::sample($content['application/json']['schema']), JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES),
                 'options' => ['raw' => ['language' => 'json']],
             ];
+        } elseif (isset($content['multipart/form-data']['schema']) && is_array($content['multipart/form-data']['schema'])) {
+            $body = [
+                'mode' => 'formdata',
+                'formdata' => $this->formData($content['multipart/form-data']['schema']),
+            ];
         }
 
         $request = [
@@ -128,6 +135,54 @@ final class PostmanGenerator
             'request' => $request,
             'response' => [],
         ];
+    }
+
+    /**
+     * @param  array<string, mixed>  $schema
+     * @return array<int, array<string, mixed>>
+     */
+    private function formData(array $schema): array
+    {
+        $fields = [];
+
+        foreach (($schema['properties'] ?? []) as $name => $property) {
+            if (! is_string($name) || ! is_array($property)) {
+                continue;
+            }
+
+            if ($this->isFileSchema($property)) {
+                $fields[] = [
+                    'key' => $name,
+                    'type' => 'file',
+                    'src' => '',
+                ];
+
+                continue;
+            }
+
+            $value = SchemaSampler::sample($property, name: $name);
+            $fields[] = [
+                'key' => $name,
+                'type' => 'text',
+                'value' => is_scalar($value) ? (string) $value : json_encode($value, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE),
+            ];
+        }
+
+        return $fields;
+    }
+
+    /**
+     * @param  array<string, mixed>  $schema
+     */
+    private function isFileSchema(array $schema): bool
+    {
+        if (($schema['format'] ?? null) === 'binary') {
+            return true;
+        }
+
+        return ($schema['type'] ?? null) === 'array'
+            && is_array($schema['items'] ?? null)
+            && ($schema['items']['format'] ?? null) === 'binary';
     }
 
     /**

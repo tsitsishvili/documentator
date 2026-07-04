@@ -66,7 +66,7 @@ Opening `http://localhost:8123/` returns 404 because the package root does not h
 | `documentation surface` | Renders the selected endpoint docs: path, summary, params, request body, responses, headers, examples.                                  |
 | `console`               | Builds the right-side request form, reads form values, handles repeatable fields/files/body JSON, and produces normalized request data. |
 | `clipboard`             | Copy helper used by links, snippets, and responses.                                                                                     |
-| `send`                  | Sends live requests with `fetch`, builds multipart/json bodies, and renders response or error output.                                   |
+| `send`                  | Sends live requests with `fetch`, builds multipart/json bodies, applies same-origin cookie parameters, and renders response or error output. |
 | `boot`                  | Fetches the OpenAPI JSON and starts rendering.                                                                                          |
 
 ## Common Change Finder

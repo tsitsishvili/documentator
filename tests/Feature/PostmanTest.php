@@ -98,3 +98,39 @@ it('maps OpenAPI security requirements to Postman auth', function () {
         ->and($requests[1]['request'])->not->toHaveKey('auth')
         ->and($requests[2]['request']['auth']['type'])->toBe('basic');
 });
+
+it('exports multipart request bodies as Postman form data', function () {
+    $openapi = [
+        'info' => ['title' => 'Acme'],
+        'paths' => [
+            '/api/uploads' => [
+                'post' => [
+                    'tags' => ['Uploads'],
+                    'summary' => 'Upload avatar',
+                    'requestBody' => [
+                        'content' => [
+                            'multipart/form-data' => [
+                                'schema' => [
+                                    'type' => 'object',
+                                    'required' => ['avatar'],
+                                    'properties' => [
+                                        'avatar' => ['type' => 'string', 'format' => 'binary'],
+                                        'name' => ['type' => 'string', 'example' => 'Ada'],
+                                    ],
+                                ],
+                            ],
+                        ],
+                    ],
+                    'responses' => ['200' => ['description' => 'ok']],
+                ],
+            ],
+        ],
+    ];
+
+    $request = (new PostmanGenerator)->generate($openapi)['item'][0]['item'][0]['request'];
+    $form = collect($request['body']['formdata'])->keyBy('key');
+
+    expect($request['body']['mode'])->toBe('formdata')
+        ->and($form['avatar']['type'])->toBe('file')
+        ->and($form['name']['value'])->toBe('Ada');
+});

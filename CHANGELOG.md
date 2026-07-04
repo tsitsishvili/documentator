@@ -7,6 +7,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.6.2] - 2026-07-04
+
+### Added
+
+- **Multipart request bodies in Postman export.** `multipart/form-data` request
+  bodies now export as Postman `formdata`, with binary and array-of-binary
+  properties emitted as `file` fields and the remaining properties emitted as
+  sampled `text` fields.
+- **Path-template validation in `OpenApiValidator`.** The validator now reports
+  duplicate `operationId`s and path-template mismatches — path parameters that
+  are declared but missing from the template, template placeholders with no
+  matching parameter, and parameter names that aren't valid OpenAPI path names.
+
+### Fixed
+
+- **Custom route binding fields produce valid path templates.** Routes with
+  explicit binding fields such as `{product:slug}` (and typed constraints) are
+  now normalized to `{product}` in OpenAPI paths and Postman URLs, and the path
+  parameter is still extracted, instead of emitting an invalid path template.
+- **Duplicate `operationId`s are made unique.** When several routes resolve to
+  the same controller action, generated `operationId`s now receive a numeric
+  suffix so each operation stays unique, as OpenAPI requires.
+- **Responses keep both schema and example.** A `#[Response]` that supplies a
+  schema (or a `type` string) together with an `example` now emits both under
+  the media type; previously the example replaced the schema.
+- **Nullable union types sample correctly.** `SchemaSampler` now resolves
+  array-typed `type` values such as `['string', 'null']` to their first
+  non-null type, so generated examples and Postman bodies no longer collapse
+  nullable fields to `null`.
+- **Cookie parameters work in the built-in "try it" console.** Documented
+  cookie parameters on same-origin requests are now applied through the browser
+  cookie jar (`document.cookie` with `credentials: 'include'`) instead of an
+  illegal `Cookie` request header that browsers silently drop.
+- **Nested multipart fields use Laravel bracket names.** Try-it requests and
+  request snippets now expand nested arrays and objects in `multipart/form-data`
+  bodies into bracketed field names such as `items[0][sku]`.
+- **Postman export handles an empty security-scheme map.** `components.securitySchemes`
+  serialized as an empty JSON object (`{}`) is coerced back to an array before
+  the Postman auth helpers read it, avoiding a type error.
+
 ## [1.6.1] - 2026-07-04
 
 ### Changed
@@ -285,7 +325,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (with a Scalar driver), Postman export, and the `documentator:generate`,
   `documentator:export` and `documentator:postman` commands.
 
-[Unreleased]: https://github.com/tsitsishvili/documentator/compare/v1.6.1...HEAD
+[Unreleased]: https://github.com/tsitsishvili/documentator/compare/v1.6.2...HEAD
+[1.6.2]: https://github.com/tsitsishvili/documentator/compare/v1.6.1...v1.6.2
 [1.6.1]: https://github.com/tsitsishvili/documentator/compare/v1.6.0...v1.6.1
 [1.6.0]: https://github.com/tsitsishvili/documentator/compare/v1.5.0...v1.6.0
 [1.5.0]: https://github.com/tsitsishvili/documentator/compare/v1.4.0...v1.5.0
