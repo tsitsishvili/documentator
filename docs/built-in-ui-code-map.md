@@ -56,9 +56,9 @@ Opening `http://localhost:8123/` returns 404 because the package root does not h
 
 | Section                 | What Happens There                                                                                                                      |
 |-------------------------|-----------------------------------------------------------------------------------------------------------------------------------------|
-| `helpers`               | Escaping, OpenAPI `$ref` resolving, schema type labels, markdown-ish text rendering, local storage helpers, URL/hash helpers.           |
+| `helpers`               | Escaping, fixed-template mounting, OpenAPI `$ref` resolving, schema type labels, markdown-ish text rendering, persisted UI state, URL/hash helpers. |
 | `data`                  | Converts `spec.paths` into `state.operations`, resolves sections, groups endpoints, and prepares server URLs.                           |
-| `security`              | Reads OpenAPI security schemes, stores auth tokens, builds auth headers/query params.                                                   |
+| `security`              | Reads OpenAPI security schemes, stores auth tokens in memory by default (or configured session/local storage), builds auth headers/query params. |
 | `shell`                 | Renders the topbar, sidebar, document panel, console panel, modals, and wires global event handlers.                                    |
 | `authorize modal`       | Builds and controls the auth token modal.                                                                                               |
 | `health modal`          | Computes and renders documentation quality metrics.                                                                                     |

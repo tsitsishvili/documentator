@@ -9,9 +9,8 @@ use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\Response;
 
 /**
- * Gate for the docs routes. With config('documentator.enabled') unset (null),
- * the docs are open everywhere except production; set it to an explicit
- * true/false to force the behaviour.
+ * Gate for the docs routes. Docs are disabled unless the host application
+ * explicitly enables them with config('documentator.enabled').
  */
 final class EnsureDocsEnabled
 {
@@ -19,7 +18,7 @@ final class EnsureDocsEnabled
     {
         $enabled = config('documentator.enabled');
 
-        $allowed = $enabled === null ? ! app()->isProduction() : (bool) $enabled;
+        $allowed = (bool) $enabled;
 
         abort_unless($allowed, 404);
 

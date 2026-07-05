@@ -22,5 +22,6 @@ abstract class TestCase extends Orchestra
         // The docs routes run through the "web" middleware group, which needs a
         // key to encrypt cookies/sessions.
         $app['config']->set('app.key', 'base64:'.base64_encode(str_repeat('a', 32)));
+        $app['config']->set('documentator.enabled', true);
     }
 }

@@ -10,9 +10,9 @@ use Symfony\Component\HttpFoundation\Response;
 use Tsitsishvili\Documentator\Documentator;
 
 /**
- * Authorization gate for the docs routes. Open by default; restrict access by
- * registering a callback with Documentator::auth() from a service provider.
- * Runs after the route's auth middleware so $request->user() is resolved.
+ * Optional per-request authorization gate for explicitly enabled docs routes.
+ * Restrict access by registering a callback with Documentator::auth() from a
+ * service provider. Runs after route middleware so $request->user() is resolved.
  */
 final class Authorize
 {

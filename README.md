@@ -269,11 +269,11 @@ Those parameters are marked in the OpenAPI document with
 
 ## Production
 
-The docs are open everywhere except production by default; in production set
-`DOCUMENTATOR_ENABLED=true` (and/or add auth via `route.middleware`) to expose
-them. To restrict *who* may view the docs, register an authorization gate from
-a service provider's `boot()` — it runs after the route middleware, so the
-authenticated user is available:
+The docs are disabled by default. Set `DOCUMENTATOR_ENABLED=true` and add auth
+via `route.middleware` for private APIs before exposing them. To restrict *who*
+may view the docs, register an authorization gate from a service provider's
+`boot()` — it runs after the route middleware, so the authenticated user is
+available:
 
 ```php
 use Tsitsishvili\Documentator\Documentator;
@@ -311,7 +311,7 @@ php artisan documentator:check --against=openapi.json  # fail if the spec has dr
 
 Key options in `config/documentator.php`:
 
-- `enabled` — docs access; `null` = open except in production, or force `true`/`false`. Restrict *who* may view with `Documentator::auth()`.
+- `enabled` — docs access; disabled by default, set `true`/`DOCUMENTATOR_ENABLED=true` to expose. Restrict *who* may view with `Documentator::auth()`.
 - `routes.match` / `routes.exclude` / `routes.exclude_middleware` — which routes are documented.
 - `route.prefix` / `route.middleware` / `route.domain` — where the UI is served. Lock it down for private APIs.
 - `title` / `version` / `description` / `servers` — OpenAPI `info` and server list.
@@ -325,7 +325,7 @@ Key options in `config/documentator.php`:
 - `grouping.*` — controller/path grouping and split section specs such as `/docs/api/openapi.json`.
 - `global_path_parameters` — reusable metadata for placeholders shared across many routes.
 - `ui.driver` — `documentator` (built-in explorer, default) or `scalar`.
-- `ui.auth_storage` — where the explorer keeps auth tokens: `local`, `session`, or `memory`.
+- `ui.auth_storage` — where the explorer keeps auth tokens: `memory` (default), `session`, or `local`.
 - `ui.assets` — Scalar bundle URL when `ui.driver = scalar` (pinned; self-host for SRI/CSP).
 - `cache` — pre-generated spec file.
 - `extensions.strategies` / `extensions.openapi_transformers` — register custom extraction strategies (resolved from the container, inserted just before attribute overrides) and transformers that receive the generated spec array and may return a modified one. See [CONTRIBUTING.md](CONTRIBUTING.md).
