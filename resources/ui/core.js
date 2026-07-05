@@ -1085,9 +1085,12 @@ export function start(deps) {
     /* ---------- documentation surface ---------- */
 
     function renderEmpty() {
-        document.getElementById('doc').innerHTML =
+        var doc = document.getElementById('doc');
+        doc.textContent = '';
+        doc.appendChild(el(
             '<div class="doc__empty"><h2>{ } Pick an endpoint</h2>' +
-            '<p>Choose a request on the left to read its contract, then try it live from the console.</p></div>';
+            '<p>Choose a request on the left to read its contract, then try it live from the console.</p></div>'
+        ));
     }
 
     function entryById(id) {
@@ -1108,7 +1111,7 @@ export function start(deps) {
         var tryBtn = document.getElementById('topbarTry');
         if (tryBtn) tryBtn.removeAttribute('hidden');
 
-        document.getElementById('responseMount').innerHTML = '';
+        document.getElementById('responseMount').textContent = '';
 
         if (decodeURIComponent((location.hash || '').slice(1)) !== (entry.slug || '')) {
             history.pushState(null, '', '#' + entry.slug);
@@ -1246,8 +1249,10 @@ export function start(deps) {
         }
 
         html += '</article>';
-        document.getElementById('doc').innerHTML = html;
-        document.getElementById('doc').scrollTop = 0;
+        var doc = document.getElementById('doc');
+        doc.textContent = '';
+        doc.appendChild(el(html));
+        doc.scrollTop = 0;
         document.getElementById('endpointTry').addEventListener('click', openConsole);
         document.getElementById('endpointLink').addEventListener('click', function () { copyEndpointLink(entry); });
     }
@@ -1484,7 +1489,7 @@ export function start(deps) {
             updateRepeatButtons(group);
         });
 
-        document.getElementById('responseMount').innerHTML = '';
+        document.getElementById('responseMount').textContent = '';
         snippets.update();
 
         var first = form.querySelector('[data-kind="path"], [data-kind="query"], [data-kind="header"], [data-kind="cookie"], [data-kind="body-field"], [data-kind="body-raw"]');
@@ -1758,14 +1763,15 @@ export function start(deps) {
 
         btn.disabled = true;
         head.setAttribute('data-busy', '');
-        mount.innerHTML =
-            '<div class="response response--pending" aria-live="polite">' +
-                '<div class="response__status">' +
-                    '<span class="response__label">Response</span>' +
-                    '<span class="response__spinner"></span>' +
-                    '<span class="response__text">Waiting for ' + esc(req.method.toUpperCase()) + '</span>' +
-                '</div>' +
-            '</div>';
+        var pending = tag('div', 'response response--pending');
+        pending.setAttribute('aria-live', 'polite');
+        var pendingStatus = tag('div', 'response__status');
+        pendingStatus.appendChild(tag('span', 'response__label', 'Response'));
+        pendingStatus.appendChild(tag('span', 'response__spinner'));
+        pendingStatus.appendChild(tag('span', 'response__text', 'Waiting for ' + req.method.toUpperCase()));
+        pending.appendChild(pendingStatus);
+        mount.textContent = '';
+        mount.appendChild(pending);
         revealResponse();
 
         var options = { method: req.method.toUpperCase(), headers: {} };
@@ -1812,6 +1818,14 @@ export function start(deps) {
         return (n / (1024 * 1024)).toFixed(2) + ' MB';
     }
 
+    function tag(name, className, text) {
+        var node = document.createElement(name);
+        if (className) node.className = className;
+        if (text !== undefined) node.textContent = text;
+
+        return node;
+    }
+
     /* Colourise pretty-printed JSON. Operates on already-escaped text (so the
        string delimiter is &quot;, not "), then wraps tokens in a fixed safe tag
        set — same escape-first contract as the markdown helpers. */
@@ -1851,13 +1865,13 @@ export function start(deps) {
         return typeof value;
     }
 
-    function jsonScalar(value) {
+    function jsonScalarNode(value) {
         var type = jsonType(value);
-        if (type === 'string') return '<span class="tok-str">' + esc(JSON.stringify(value)) + '</span>';
-        if (type === 'number') return '<span class="tok-num">' + esc(value) + '</span>';
-        if (type === 'boolean') return '<span class="tok-bool">' + esc(value) + '</span>';
-        if (type === 'null') return '<span class="tok-null">null</span>';
-        return '<span class="tok-null">' + esc(String(value)) + '</span>';
+        if (type === 'string') return tag('span', 'tok-str', JSON.stringify(value));
+        if (type === 'number') return tag('span', 'tok-num', String(value));
+        if (type === 'boolean') return tag('span', 'tok-bool', String(value));
+        if (type === 'null') return tag('span', 'tok-null', 'null');
+        return tag('span', 'tok-null', String(value));
     }
 
     function jsonKeyLabel(key) {
@@ -1865,15 +1879,20 @@ export function start(deps) {
         return typeof key === 'number' ? '[' + key + ']' : key;
     }
 
-    function jsonNode(value, key, depth) {
+    function jsonNodeElement(value, key, depth) {
         var type = jsonType(value);
         var keyLabel = jsonKeyLabel(key);
-        var keyHtml = keyLabel !== ''
-            ? '<span class="response-json__key">' + esc(keyLabel) + '</span><span class="response-json__colon">:</span>'
-            : '<span class="response-json__key">root</span>';
+        var keyNode = tag('span', 'response-json__key', keyLabel !== '' ? keyLabel : 'root');
+        var colon = tag('span', 'response-json__colon', ':');
 
         if (type !== 'object' && type !== 'array') {
-            return '<div class="response-json__row">' + keyHtml + ' ' + jsonScalar(value) + '</div>';
+            var row = tag('div', 'response-json__row');
+            row.appendChild(keyNode);
+            row.appendChild(colon);
+            row.appendChild(document.createTextNode(' '));
+            row.appendChild(jsonScalarNode(value));
+
+            return row;
         }
 
         var isArray = type === 'array';
@@ -1881,30 +1900,43 @@ export function start(deps) {
         var count = isArray ? value.length : items.length;
         var summary = count + ' ' + (isArray ? (count === 1 ? 'item' : 'items') : (count === 1 ? 'field' : 'fields'));
         var empty = count === 0;
-        var open = depth < 2 && !empty ? ' open' : '';
-        var children = '';
+        var details = tag('details', 'response-json response-json--' + type);
+        if (depth < 2 && !empty) details.open = true;
+
+        var summaryNode = document.createElement('summary');
+        summaryNode.appendChild(keyNode);
+        summaryNode.appendChild(colon);
+        summaryNode.appendChild(document.createTextNode(' '));
+        summaryNode.appendChild(tag('span', 'response-json__brace', isArray ? '[' : '{'));
+        summaryNode.appendChild(document.createTextNode(' '));
+        summaryNode.appendChild(tag('span', 'response-json__meta', summary));
+        if (empty) summaryNode.appendChild(tag('span', 'response-json__empty', 'empty'));
+        details.appendChild(summaryNode);
 
         if (!empty) {
-            children = (isArray ? value.map(function (item, i) {
-                return jsonNode(item, i, depth + 1);
-            }) : Object.keys(value).map(function (name) {
-                return jsonNode(value[name], name, depth + 1);
-            })).join('');
+            var children = tag('div', 'response-json__children');
+            if (isArray) {
+                value.forEach(function (item, i) {
+                    children.appendChild(jsonNodeElement(item, i, depth + 1));
+                });
+            } else {
+                Object.keys(value).forEach(function (name) {
+                    children.appendChild(jsonNodeElement(value[name], name, depth + 1));
+                });
+            }
+            details.appendChild(children);
         }
 
-        return '<details class="response-json response-json--' + type + '"' + open + '>' +
-            '<summary>' + keyHtml +
-                ' <span class="response-json__brace">' + esc(isArray ? '[' : '{') + '</span>' +
-                ' <span class="response-json__meta">' + esc(summary) + '</span>' +
-                (empty ? '<span class="response-json__empty">empty</span>' : '') +
-            '</summary>' +
-            (empty ? '' : '<div class="response-json__children">' + children + '</div>') +
-            '<div class="response-json__end">' + esc(isArray ? ']' : '}') + '</div>' +
-        '</details>';
+        details.appendChild(tag('div', 'response-json__end', isArray ? ']' : '}'));
+
+        return details;
     }
 
-    function jsonTree(value) {
-        return '<div class="response__tree">' + jsonNode(value, null, 0) + '</div>';
+    function jsonTreeElement(value) {
+        var tree = tag('div', 'response__tree');
+        tree.appendChild(jsonNodeElement(value, null, 0));
+
+        return tree;
     }
 
     function renderResponse(res, text, ms) {
@@ -1915,44 +1947,78 @@ export function start(deps) {
 
         var size = formatBytes(new Blob([text]).size);
         var ctype = (res.headers.get('content-type') || '').split(';')[0].trim();
-        var ctypeTag = ctype ? '<span class="response__ctype">' + esc(ctype) + '</span>' : '';
-
         var headers = [];
         res.headers.forEach(function (value, key) { headers.push({ key: key, value: value }); });
-        var headerRows = headers.length
-            ? headers.map(function (h) {
-                return '<div class="hrow"><span class="hrow__key">' + esc(h.key) + '</span>' +
-                    '<span class="hrow__val">' + esc(h.value) + '</span></div>';
-            }).join('')
-            : '<div class="response__empty">No headers</div>';
 
-        var bodyHtml = text === ''
-            ? '<div class="response__empty">No content</div>'
-            : (isJson ? jsonTree(parsedJson) : '<pre class="response__body">' + esc(body) + '</pre>');
-        var copyBtn = text === '' ? '' : '<button class="response__copy" type="button">Copy</button>';
-        var treeControls = isJson
-            ? '<span class="response__tree-controls">' +
-                '<button class="response__tree-action" type="button" data-json-action="expand">Expand all</button>' +
-                '<button class="response__tree-action" type="button" data-json-action="collapse">Collapse all</button>' +
-            '</span>'
-            : '';
+        var mount = document.getElementById('responseMount');
+        var response = tag('div', 'response');
+        response.setAttribute('aria-live', 'polite');
 
-        document.getElementById('responseMount').innerHTML =
-            '<div class="response" aria-live="polite">' +
-                '<div class="response__status">' +
-                    '<span class="response__label">Response</span>' +
-                    '<span class="response__code" data-class="' + statusClass(res.status) + '">' + esc(res.status) + '</span>' +
-                    '<span class="response__text">' + esc(res.statusText || '') + '</span>' +
-                    ctypeTag +
-                    '<span class="response__meta">' + esc(size) + ' · ' + ms + ' ms</span>' +
-                '</div>' +
-                '<details open><summary>Body' + treeControls + copyBtn + '</summary>' + bodyHtml + '</details>' +
-                '<details><summary>Headers <span class="summary__count">' + headers.length + '</span></summary>' +
-                    '<div class="response__headers">' + headerRows + '</div></details>' +
-            '</div>';
+        var status = tag('div', 'response__status');
+        var statusCode = tag('span', 'response__code', String(res.status));
+        statusCode.setAttribute('data-class', statusClass(res.status));
+        status.appendChild(tag('span', 'response__label', 'Response'));
+        status.appendChild(statusCode);
+        status.appendChild(tag('span', 'response__text', res.statusText || ''));
+        if (ctype) status.appendChild(tag('span', 'response__ctype', ctype));
+        status.appendChild(tag('span', 'response__meta', size + ' · ' + ms + ' ms'));
+        response.appendChild(status);
+
+        var bodyDetails = document.createElement('details');
+        bodyDetails.open = true;
+        var bodySummary = document.createElement('summary');
+        bodySummary.appendChild(document.createTextNode('Body'));
+        if (isJson) {
+            var treeControls = tag('span', 'response__tree-controls');
+            var expand = tag('button', 'response__tree-action', 'Expand all');
+            expand.type = 'button';
+            expand.dataset.jsonAction = 'expand';
+            var collapse = tag('button', 'response__tree-action', 'Collapse all');
+            collapse.type = 'button';
+            collapse.dataset.jsonAction = 'collapse';
+            treeControls.appendChild(expand);
+            treeControls.appendChild(collapse);
+            bodySummary.appendChild(treeControls);
+        }
+        if (text !== '') {
+            var copyBtn = tag('button', 'response__copy', 'Copy');
+            copyBtn.type = 'button';
+            bodySummary.appendChild(copyBtn);
+        }
+        bodyDetails.appendChild(bodySummary);
+        if (text === '') {
+            bodyDetails.appendChild(tag('div', 'response__empty', 'No content'));
+        } else if (isJson) {
+            bodyDetails.appendChild(jsonTreeElement(parsedJson));
+        } else {
+            bodyDetails.appendChild(tag('pre', 'response__body', body));
+        }
+        response.appendChild(bodyDetails);
+
+        var headerDetails = document.createElement('details');
+        var headerSummary = document.createElement('summary');
+        headerSummary.appendChild(document.createTextNode('Headers '));
+        headerSummary.appendChild(tag('span', 'summary__count', String(headers.length)));
+        headerDetails.appendChild(headerSummary);
+        var headerWrap = tag('div', 'response__headers');
+        if (headers.length) {
+            headers.forEach(function (h) {
+                var row = tag('div', 'hrow');
+                row.appendChild(tag('span', 'hrow__key', h.key));
+                row.appendChild(tag('span', 'hrow__val', h.value));
+                headerWrap.appendChild(row);
+            });
+        } else {
+            headerWrap.appendChild(tag('div', 'response__empty', 'No headers'));
+        }
+        headerDetails.appendChild(headerWrap);
+        response.appendChild(headerDetails);
+
+        mount.textContent = '';
+        mount.appendChild(response);
         revealResponse();
 
-        var btn = document.querySelector('.response__copy');
+        var btn = response.querySelector('.response__copy');
         if (btn) btn.addEventListener('click', function (e) {
             e.preventDefault();
             e.stopPropagation(); // don't toggle the <details>
@@ -1962,12 +2028,12 @@ export function start(deps) {
             });
         });
 
-        document.querySelectorAll('.response__tree-action').forEach(function (control) {
+        response.querySelectorAll('.response__tree-action').forEach(function (control) {
             control.addEventListener('click', function (e) {
                 e.preventDefault();
                 e.stopPropagation();
                 var open = control.dataset.jsonAction === 'expand';
-                document.querySelectorAll('.response-json').forEach(function (node) {
+                response.querySelectorAll('.response-json').forEach(function (node) {
                     node.open = open;
                 });
             });
@@ -1975,11 +2041,25 @@ export function start(deps) {
     }
 
     function renderError(err, url) {
-        document.getElementById('responseMount').innerHTML =
-            '<div class="response" aria-live="polite"><div class="response__status"><span class="response__label">Response</span><span class="response__code" data-class="x">—</span>' +
-            '<span>Request failed</span></div><div class="response__hint">Couldn’t reach <b>' + esc(url) + '</b>. ' +
-            'This is usually CORS: the API must allow requests from this docs origin (' + esc(location.origin) +
-            '), or the server URL is wrong. Browser detail: ' + esc(err && err.message) + '</div></div>';
+        var response = tag('div', 'response');
+        response.setAttribute('aria-live', 'polite');
+        var status = tag('div', 'response__status');
+        var code = tag('span', 'response__code', '—');
+        code.setAttribute('data-class', 'x');
+        status.appendChild(tag('span', 'response__label', 'Response'));
+        status.appendChild(code);
+        status.appendChild(tag('span', null, 'Request failed'));
+        response.appendChild(status);
+
+        var hint = tag('div', 'response__hint');
+        hint.appendChild(document.createTextNode('Couldn’t reach '));
+        hint.appendChild(tag('b', null, url));
+        hint.appendChild(document.createTextNode('. This is usually CORS: the API must allow requests from this docs origin (' + location.origin + '), or the server URL is wrong. Browser detail: ' + (err && err.message ? err.message : '')));
+        response.appendChild(hint);
+
+        var mount = document.getElementById('responseMount');
+        mount.textContent = '';
+        mount.appendChild(response);
         revealResponse();
     }
 

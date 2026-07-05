@@ -109,6 +109,24 @@ function cookieSpec() {
   };
 }
 
+function hostileResponseSpec() {
+  return {
+    openapi: '3.1.0',
+    info: { title: 'Unsafe API', version: '1.0.0' },
+    servers: [{ url: 'http://documentator.test' }],
+    paths: {
+      '/api/unsafe': {
+        get: {
+          operationId: 'unsafeResponse',
+          tags: ['Security'],
+          summary: 'Unsafe response',
+          responses: { 200: { description: 'OK' } },
+        },
+      },
+    },
+  };
+}
+
 async function mount(page, openapi = spec()) {
   const [css, js, core, snippets] = await Promise.all([
     readFile(resolve(root, 'resources/ui/app.css'), 'utf8'),
@@ -244,4 +262,27 @@ test('cookie parameters are applied through browser cookies on same-origin reque
   await page.locator('#send').click();
 
   await expect.poll(() => cookieHeader).toContain('session_id=abc123');
+});
+
+test('live response rendering keeps arbitrary API content inert', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 860 });
+  const hostileBody = '<img src=x onerror="window.__bodyXss=1"><script>window.__scriptXss=1</script>';
+  const hostileHeader = '<img src=x onerror="window.__headerXss=1">';
+
+  await page.route('http://documentator.test/api/unsafe', route => route.fulfill({
+    status: 418,
+    contentType: 'text/plain',
+    headers: { 'X-Evil': hostileHeader },
+    body: hostileBody,
+  }));
+
+  await mount(page, hostileResponseSpec());
+  await page.locator('.nav-item').first().click();
+  await page.locator('#send').click();
+
+  await expect(page.locator('.response__code')).toContainText('418');
+  await expect(page.locator('.response__body')).toContainText(hostileBody);
+  await expect(page.locator('.hrow__val').filter({ hasText: hostileHeader })).toHaveCount(1);
+  await expect(page.locator('.response img, .response script')).toHaveCount(0);
+  expect(await page.evaluate(() => Boolean(window.__bodyXss || window.__scriptXss || window.__headerXss))).toBe(false);
 });
