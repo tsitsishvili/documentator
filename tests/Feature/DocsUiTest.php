@@ -29,6 +29,13 @@ it('passes the configured auth storage mode to the built-in explorer', function 
     expect($response->getContent())->toContain('authStorage: "session"');
 });
 
+it('uses memory auth storage by default', function () {
+    $response = $this->get('/docs');
+
+    $response->assertOk();
+    expect($response->getContent())->toContain('authStorage: "memory"');
+});
+
 it('serves the built-in CSS and JS assets', function () {
     $this->get('/docs/assets/app.css')
         ->assertOk()

@@ -66,6 +66,13 @@ it('hides the docs when access is disabled', function () {
     $this->get('/docs/openapi.json')->assertNotFound();
 });
 
+it('hides the docs when access is not explicitly enabled', function () {
+    config(['documentator.enabled' => null]);
+
+    $this->get('/docs')->assertNotFound();
+    $this->get('/docs/openapi.json')->assertNotFound();
+});
+
 it('serves the docs when access is explicitly enabled', function () {
     config(['documentator.enabled' => true]);
 

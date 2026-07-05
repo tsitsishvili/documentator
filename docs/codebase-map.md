@@ -28,7 +28,7 @@ Runtime flow:
 
 | File                                  | What Happens There                                                                                                                                                              |
 |---------------------------------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `src/Documentator.php`                | High-level API: `endpoints()` returns extracted endpoint objects, `toOpenApi()` returns the generated spec, and `auth()` / `check()` gate docs access.                          |
+| `src/Documentator.php`                | High-level API: `endpoints()` returns extracted endpoint objects, `toOpenApi()` returns the generated spec, and `auth()` / `check()` add per-request access control after docs are explicitly enabled. |
 | `src/DocumentatorServiceProvider.php` | Laravel integration: merges config, binds collector/pipeline/generator services, registers docs/OpenAPI/asset routes, registers commands, and publishes config/views.           |
 | `config/documentator.php`             | All package configuration defaults: route matching, docs route, UI driver, grouping, global path parameters, auth, status-code inference, examples, cache, and extension hooks. |
 | `composer.json`                       | Package metadata, Laravel provider discovery, dependencies, optional integrations, and scripts.                                                                                 |
@@ -120,8 +120,8 @@ resource schemas are built.
 | `src/Http/Controllers/DocsController.php`    | Serves the docs page. Redirects `/docs` to the first section when sections exist. |
 | `src/Http/Controllers/OpenApiController.php` | Serves OpenAPI JSON, optionally from the configured cache.                        |
 | `src/Http/Controllers/AssetController.php`   | Serves whitelisted built-in UI assets.                                            |
-| `src/Http/Middleware/EnsureDocsEnabled.php`  | Blocks docs routes when config/env says docs are disabled.                        |
-| `src/Http/Middleware/Authorize.php`          | Calls `Documentator::check()` for custom docs access control.                     |
+| `src/Http/Middleware/EnsureDocsEnabled.php`  | Blocks docs routes unless `documentator.enabled` / `DOCUMENTATOR_ENABLED` explicitly enables them. |
+| `src/Http/Middleware/Authorize.php`          | Calls `Documentator::check()` for optional custom docs access control.            |
 | `resources/views/docs.blade.php`             | HTML shell for the built-in explorer.                                             |
 | `resources/views/scalar.blade.php`           | HTML shell for Scalar.                                                            |
 | `resources/ui/app.js`                        | Built-in UI entrypoint.                                                           |

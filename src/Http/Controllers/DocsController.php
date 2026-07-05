@@ -50,7 +50,7 @@ final class DocsController
             'specUrl' => $specUrl,
             'sections' => $this->sectionLinks(),
             'currentSection' => $currentSection,
-            'authStorage' => config('documentator.ui.auth_storage', 'local'),
+            'authStorage' => config('documentator.ui.auth_storage', 'memory'),
             'cssUrl' => $this->assetUrl('app.css'),
             'jsUrl' => $this->assetUrl('app.js'),
         ]);

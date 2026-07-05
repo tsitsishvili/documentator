@@ -18,8 +18,9 @@ use Tsitsishvili\Documentator\OpenApi\OpenApiGenerator;
 final class Documentator
 {
     /**
-     * Authorization gate for the docs routes. Null means open (subject only to
-     * EnsureDocsEnabled); register a callback to restrict who may view them.
+     * Authorization gate for docs routes after they have been explicitly
+     * enabled. Null means no additional per-request restriction; register a
+     * callback to restrict who may view them.
      *
      * @var (Closure(Request): bool)|null
      */
@@ -44,8 +45,8 @@ final class Documentator
     }
 
     /**
-     * Whether the current request is authorized to view the docs. Open unless a
-     * callback has been registered via auth().
+     * Whether the current request is authorized to view the already-enabled
+     * docs route. Allows unless a callback has been registered via auth().
      */
     public static function check(Request $request): bool
     {

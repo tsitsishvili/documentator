@@ -77,6 +77,13 @@ export function start(deps) {
         return t.content.firstElementChild;
     }
 
+    function replaceHtml(node, html) {
+        var t = document.createElement('template');
+        t.innerHTML = html.trim();
+        node.textContent = '';
+        node.appendChild(t.content);
+    }
+
     function statusClass(code) {
         if (!code || code < 100) return 'x';
         return String(Math.floor(code / 100));
@@ -249,6 +256,28 @@ export function start(deps) {
             return '<button class="topbar__method m-' + method + active + '" type="button" data-method-filter="' + method +
                 '" aria-pressed="' + (state.methodFilter === method ? 'true' : 'false') + '">' + method.toUpperCase() + ' ' + counts[method] + '</button>';
         }).join('');
+    }
+
+    function renderMethodStats() {
+        var mount = document.getElementById('methodStats');
+        if (!mount) return;
+
+        var counts = {};
+        state.operations.forEach(function (entry) {
+            counts[entry.method] = (counts[entry.method] || 0) + 1;
+        });
+
+        mount.textContent = '';
+        mount.appendChild(tag('span', null, plural(state.operations.length, 'endpoint', 'endpoints')));
+        METHODS.forEach(function (method) {
+            if (!counts[method]) return;
+            var active = state.methodFilter === method;
+            var btn = tag('button', 'topbar__method m-' + method + (active ? ' is-active' : ''), method.toUpperCase() + ' ' + counts[method]);
+            btn.type = 'button';
+            btn.dataset.methodFilter = method;
+            btn.setAttribute('aria-pressed', active ? 'true' : 'false');
+            mount.appendChild(btn);
+        });
     }
 
     function isConsoleDocked() {
@@ -588,7 +617,7 @@ export function start(deps) {
     function renderShell() {
         var info = state.spec.info || {};
         app.dataset.state = 'ready';
-        app.innerHTML = '';
+        app.textContent = '';
 
         var version = info.version ? '<span class="topbar__version">v' + esc(info.version) + '</span>' : '';
         var authBtn = hasSecuritySchemes()
@@ -663,7 +692,7 @@ export function start(deps) {
             if (!btn) return;
             state.methodFilter = state.methodFilter === btn.dataset.methodFilter ? '' : btn.dataset.methodFilter;
             store.set('method', state.methodFilter);
-            document.getElementById('methodStats').innerHTML = '<span>' + esc(plural(state.operations.length, 'endpoint', 'endpoints')) + '</span>' + methodStats();
+            renderMethodStats();
             renderNav(document.getElementById('search').value);
         });
         document.getElementById('search').addEventListener('input', function (e) {
@@ -917,7 +946,7 @@ export function start(deps) {
         if (!btn) return;
         var on = anyAuthorized();
         btn.classList.toggle('is-on', on);
-        btn.innerHTML = on ? '&#128274; Authorized' : '&#128275; Authorize';
+        btn.textContent = on ? '\uD83D\uDD12 Authorized' : '\uD83D\uDD13 Authorize';
     }
 
     /* ---------- health modal ---------- */
@@ -931,11 +960,12 @@ export function start(deps) {
             '</div></div>';
     }
 
-    function healthRow(label, value, warn) {
-        return '<div class="healthrow' + (warn ? ' is-warn' : '') + '">' +
-            '<span class="healthrow__label">' + esc(label) + '</span>' +
-            '<span class="healthrow__value">' + esc(value) + '</span>' +
-        '</div>';
+    function healthRowElement(label, value, warn) {
+        var row = tag('div', 'healthrow' + (warn ? ' is-warn' : ''));
+        row.appendChild(tag('span', 'healthrow__label', label));
+        row.appendChild(tag('span', 'healthrow__value', String(value)));
+
+        return row;
     }
 
     function openHealth() {
@@ -944,16 +974,16 @@ export function start(deps) {
         if (!m || !body) return;
 
         var h = healthMetrics();
-        body.innerHTML =
-            '<div class="healthgrid">' +
-                healthRow('Operations', h.operations, false) +
-                healthRow('Tags', h.tags + ' · ' + h.singletonTags + ' singletons', h.singletonTags >= 10 && h.singletonTags / Math.max(h.tags, 1) >= .6) +
-                healthRow('Secured', h.secured, h.securitySchemes > 0 && h.secured === 0 && !h.rootSecurity) +
-                healthRow('Missing summaries', h.missingSummaries, h.missingSummaries > 0) +
-                healthRow('Generic summaries', h.genericSummaries, h.genericSummaries > 0) +
-                healthRow('Missing descriptions', h.missingDescriptions, h.missingDescriptions > 0) +
-                healthRow('Generic 200s', h.genericSuccesses, h.genericSuccesses > 0) +
-            '</div>';
+        var grid = tag('div', 'healthgrid');
+        grid.appendChild(healthRowElement('Operations', h.operations, false));
+        grid.appendChild(healthRowElement('Tags', h.tags + ' · ' + h.singletonTags + ' singletons', h.singletonTags >= 10 && h.singletonTags / Math.max(h.tags, 1) >= .6));
+        grid.appendChild(healthRowElement('Secured', h.secured, h.securitySchemes > 0 && h.secured === 0 && !h.rootSecurity));
+        grid.appendChild(healthRowElement('Missing summaries', h.missingSummaries, h.missingSummaries > 0));
+        grid.appendChild(healthRowElement('Generic summaries', h.genericSummaries, h.genericSummaries > 0));
+        grid.appendChild(healthRowElement('Missing descriptions', h.missingDescriptions, h.missingDescriptions > 0));
+        grid.appendChild(healthRowElement('Generic 200s', h.genericSuccesses, h.genericSuccesses > 0));
+        body.textContent = '';
+        body.appendChild(grid);
         m.removeAttribute('hidden');
     }
 
@@ -969,8 +999,8 @@ export function start(deps) {
         var groups = groupsFor(filter);
         if (!groups.length) {
             state.navRows = [];
-            nav.innerHTML = '<p class="nav__empty">No matching endpoints' +
-                (state.sectionFilter ? ' in ' + esc(state.sectionFilter) : '') + '.</p>';
+            nav.textContent = '';
+            nav.appendChild(tag('p', 'nav__empty', 'No matching endpoints' + (state.sectionFilter ? ' in ' + state.sectionFilter : '') + '.'));
             return;
         }
         state.navRows = navRows(groups);
@@ -1031,9 +1061,9 @@ export function start(deps) {
             return row.top + row.height >= start && row.top <= end;
         });
 
-        nav.innerHTML = '<div class="nav__spacer" style="height:' + total + 'px">' +
+        replaceHtml(nav, '<div class="nav__spacer" style="height:' + total + 'px">' +
             visible.map(renderNavRow).join('') +
-        '</div>';
+        '</div>');
     }
 
     function scheduleVirtualNav() {
@@ -1318,6 +1348,29 @@ export function start(deps) {
         '</div>';
     }
 
+    function repeatValueRowElement(kind, name, ftype, placeholder, removable, value) {
+        var row = tag('div', 'repeat__row');
+        var input = tag('input', 'input');
+        input.type = ftype;
+        input.dataset.kind = kind;
+        input.dataset.array = 'true';
+        input.dataset.name = name;
+        input.dataset.ftype = ftype;
+        input.value = value || '';
+        input.placeholder = placeholder;
+        row.appendChild(input);
+
+        var remove = tag('button', 'repeat__remove', '×');
+        remove.type = 'button';
+        remove.dataset.repeatRemove = '';
+        remove.setAttribute('aria-label', 'Remove ' + name + ' value');
+        remove.title = 'Remove';
+        remove.disabled = !removable;
+        row.appendChild(remove);
+
+        return row;
+    }
+
     function updateRepeatButtons(group) {
         var rows = group.querySelectorAll('.repeat__row');
         rows.forEach(function (row) {
@@ -1335,7 +1388,7 @@ export function start(deps) {
             var items = group ? group.querySelector('.repeat__items') : null;
             if (!group || !items) return;
 
-            items.insertAdjacentHTML('beforeend', repeatValueRow(
+            items.appendChild(repeatValueRowElement(
                 group.dataset.repeatKind || 'query',
                 group.dataset.name,
                 group.dataset.ftype || 'text',
@@ -1567,7 +1620,7 @@ export function start(deps) {
 
         html += snippets.html();
 
-        form.innerHTML = html;
+        replaceHtml(form, html);
         var consoleAuthBtn = document.getElementById('consoleAuthBtn');
         if (consoleAuthBtn) consoleAuthBtn.addEventListener('click', openAuth);
         snippets.wire();

@@ -111,7 +111,9 @@ must never break the document.**
 
 ## Security
 
-- All spec-derived strings rendered in the built-in UI go through the `esc()`
-  helper before `innerHTML`; Markdown goes through `block()`/`inline()` which
-  escape first. Keep that order — never interpolate untrusted strings into HTML.
+- Prefer DOM APIs (`textContent`, `appendChild`, `replaceChildren`) for
+  spec-derived strings in the built-in UI. Where fixed templates are still
+  required, render through the local helper and escape every interpolated value
+  with `esc()` first; Markdown goes through `block()`/`inline()` which escape
+  first. Keep that order — never interpolate untrusted strings into HTML.
 - Pinned, versioned asset URLs only (no unversioned "latest" CDN tags).

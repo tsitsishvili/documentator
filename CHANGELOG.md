@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.6.3] - 2026-07-05
+
+### Security
+
+- **Hardened built-in try-it response rendering.** Live API responses, headers,
+  pending state and error state are now mounted with DOM APIs and `textContent`
+  instead of interpolating arbitrary response content into `innerHTML`, reducing
+  XSS risk from hostile API responses.
+- **Docs routes are disabled by default.** `documentator.enabled` now defaults
+  to `false`; set `DOCUMENTATOR_ENABLED=true` to expose the UI/OpenAPI routes,
+  then protect private APIs with route middleware and/or `Documentator::auth()`.
+- **Try-it auth tokens stay in memory by default.** `ui.auth_storage` now
+  defaults to `memory` instead of persistent `localStorage`, while `session` and
+  `local` remain available for teams that explicitly choose persistence.
+- **Reduced string-based UI update sinks.** Repeated live updates in the built-in
+  explorer now prefer DOM construction, with remaining fixed-template rendering
+  centralized behind helper functions and documented escape-first guidance.
+
+### Changed
+
+- **Security docs and internals docs refreshed.** README, SECURITY, coding
+  standards and code maps now describe explicit docs enablement, memory auth
+  storage, Scalar self-hosting guidance, and the built-in UI rendering contract.
+
 ## [1.6.2] - 2026-07-04
 
 ### Added
@@ -325,7 +349,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (with a Scalar driver), Postman export, and the `documentator:generate`,
   `documentator:export` and `documentator:postman` commands.
 
-[Unreleased]: https://github.com/tsitsishvili/documentator/compare/v1.6.2...HEAD
+[Unreleased]: https://github.com/tsitsishvili/documentator/compare/v1.6.3...HEAD
+[1.6.3]: https://github.com/tsitsishvili/documentator/compare/v1.6.2...v1.6.3
 [1.6.2]: https://github.com/tsitsishvili/documentator/compare/v1.6.1...v1.6.2
 [1.6.1]: https://github.com/tsitsishvili/documentator/compare/v1.6.0...v1.6.1
 [1.6.0]: https://github.com/tsitsishvili/documentator/compare/v1.5.0...v1.6.0

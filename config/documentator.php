@@ -23,16 +23,16 @@ return [
     | Access
     |--------------------------------------------------------------------------
     |
-    | Whether the docs routes are reachable. Leave null to open them everywhere
-    | except production; set true/false to force it. Combine with route
-    | middleware below to put the docs behind auth. To restrict *who* may view
-    | them, register a gate with Documentator::auth() from a service provider:
+    | Whether the docs routes are reachable. They are disabled by default; set
+    | DOCUMENTATOR_ENABLED=true to expose them. Combine with route middleware
+    | below to put the docs behind auth. To restrict *who* may view them,
+    | register a gate with Documentator::auth() from a service provider:
     |
     |     Documentator::auth(fn ($request) => $request->user()?->is_admin);
     |
     */
 
-    'enabled' => env('DOCUMENTATOR_ENABLED', null),
+    'enabled' => env('DOCUMENTATOR_ENABLED', false),
 
     /*
     |--------------------------------------------------------------------------
@@ -79,7 +79,7 @@ return [
     'ui' => [
         'driver' => env('DOCUMENTATOR_UI', 'documentator'),
         'assets' => env('DOCUMENTATOR_UI_ASSETS', 'https://cdn.jsdelivr.net/npm/@scalar/api-reference@1.25.0/dist/browser/standalone.min.js'),
-        'auth_storage' => env('DOCUMENTATOR_AUTH_STORAGE', 'local'), // local, session, memory
+        'auth_storage' => env('DOCUMENTATOR_AUTH_STORAGE', 'memory'), // memory, session, local
     ],
 
     /*

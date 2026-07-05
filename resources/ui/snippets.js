@@ -657,9 +657,13 @@ export function createSnippetController(deps) {
         });
     }
 
+    function renderHighlightedCode(code, source) {
+        code.innerHTML = highlightCode(esc(source));
+    }
+
     function updateSnippet() {
         var code = document.getElementById('snippetCode');
-        if (code) code.innerHTML = highlightCode(esc(GENERATORS[activeLang()].build(readForm())));
+        if (code) renderHighlightedCode(code, GENERATORS[activeLang()].build(readForm()));
     }
 
     function copySnippet() {
