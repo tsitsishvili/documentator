@@ -331,6 +331,51 @@ Key options in `config/documentator.php`:
 - `extensions.strategies` / `extensions.openapi_transformers` — register custom extraction strategies (resolved from the container, inserted just before attribute overrides) and transformers that receive the generated spec array and may return a modified one. See [CONTRIBUTING.md](CONTRIBUTING.md).
 - `extensions.validation_rule_transformers` — register classes implementing `Tsitsishvili\Documentator\Contracts\ValidationRuleTransformer` to map project-specific Laravel validation rules to OpenAPI schemas.
 
+## AI agents
+
+Documentator ships guidance so AI coding agents in **your** app write endpoints
+that document themselves — typed FormRequests, Resource return types, docblocks —
+and reach for its attributes only to fill gaps.
+
+**Laravel Boost** (recommended) discovers it automatically. In an app that uses
+Boost, running `php artisan boost:install` loads Documentator's always-on
+guideline (`resources/boost/guidelines/core.blade.php`) into your `CLAUDE.md` /
+`AGENTS.md`, and offers to install the on-demand `documentator-api-docs` skill
+(`resources/boost/skills/documentator-api-docs/SKILL.md`). No extra step.
+
+To keep the guidance current as the package is upgraded, run
+`php artisan boost:update`, or add it to your app's Composer scripts so it
+refreshes on every dependency update:
+
+```json
+{
+    "scripts": {
+        "post-update-cmd": [
+            "@php artisan boost:update --ansi"
+        ]
+    }
+}
+```
+
+**Without Boost**, publish the same guidance into the native locations for
+Claude Code, Cursor, Gemini CLI, Codex, and other agents:
+
+```bash
+php artisan vendor:publish --tag=documentator-ai
+```
+
+This writes:
+
+- `.claude/skills/documentator-api-docs/SKILL.md` — the full Claude Code / Agent Skills skill.
+- `.cursor/rules/documentator.mdc` — a Cursor rule that auto-attaches on API code.
+- `GEMINI.md` — always-on guidance auto-loaded by Gemini CLI.
+- `AGENTS.md` — always-on guidance auto-loaded by Codex and other `AGENTS.md` agents.
+- `.ai/guidelines/documentator.md` — the same short guideline for any other agent.
+
+`vendor:publish` never overwrites an existing file, so a `GEMINI.md` or
+`AGENTS.md` you already maintain is left untouched (pass `--force` to replace it,
+or copy the snippet in by hand).
+
 ## Development
 
 ```bash
