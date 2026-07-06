@@ -3,6 +3,8 @@
 declare(strict_types=1);
 
 use Illuminate\Support\Facades\Route;
+use Illuminate\Support\ServiceProvider;
+use Tsitsishvili\Documentator\DocumentatorServiceProvider;
 use Tsitsishvili\Documentator\OpenApi\OpenApiSections;
 
 it('exports the OpenAPI document to a file', function () {
@@ -57,6 +59,66 @@ it('generates split cached OpenAPI documents for configured sections', function 
     @unlink($apiPath);
     @unlink($appPath);
     @rmdir(dirname($path));
+});
+
+it('ships AI agent guidance files with the package', function () {
+    $root = dirname(__DIR__, 2);
+
+    expect(is_file($root.'/resources/boost/guidelines/core.blade.php'))->toBeTrue()
+        ->and(is_file($root.'/resources/boost/skills/documentator-api-docs/SKILL.md'))->toBeTrue()
+        ->and(is_file($root.'/resources/ai/guidelines/documentator.md'))->toBeTrue()
+        ->and(is_file($root.'/resources/ai/cursor/documentator.mdc'))->toBeTrue()
+        ->and(is_file($root.'/resources/ai/gemini/documentator.md'))->toBeTrue()
+        ->and(is_file($root.'/resources/ai/codex/documentator.md'))->toBeTrue();
+
+    $skill = (string) file_get_contents($root.'/resources/boost/skills/documentator-api-docs/SKILL.md');
+    expect($skill)->toStartWith('---')
+        ->and($skill)->toContain('name: documentator-api-docs')
+        ->and($skill)->toContain('description:');
+
+    $attributeNames = array_map(
+        fn (string $path): string => pathinfo($path, PATHINFO_FILENAME),
+        glob($root.'/src/Attributes/*.php') ?: [],
+    );
+
+    expect($attributeNames)->not->toBeEmpty();
+
+    foreach ($attributeNames as $attributeName) {
+        expect($skill)->toContain($attributeName);
+    }
+
+    $shortGuidanceFiles = [
+        $root.'/resources/boost/guidelines/core.blade.php',
+        $root.'/resources/ai/guidelines/documentator.md',
+        $root.'/resources/ai/cursor/documentator.mdc',
+        $root.'/resources/ai/gemini/documentator.md',
+        $root.'/resources/ai/codex/documentator.md',
+    ];
+
+    foreach ($shortGuidanceFiles as $path) {
+        $guidance = (string) file_get_contents($path);
+
+        foreach ($attributeNames as $attributeName) {
+            expect($guidance)->toContain($attributeName);
+        }
+    }
+});
+
+it('publishes AI guidance to native agent locations under the documentator-ai tag', function () {
+    $normalized = [];
+    foreach (ServiceProvider::pathsToPublish(DocumentatorServiceProvider::class, 'documentator-ai') as $source => $destination) {
+        $normalized[realpath($source) ?: $source] = $destination;
+    }
+
+    $root = dirname(__DIR__, 2);
+
+    expect($normalized)->toBe([
+        realpath($root.'/resources/boost/skills/documentator-api-docs') => base_path('.claude/skills/documentator-api-docs'),
+        realpath($root.'/resources/ai/guidelines/documentator.md') => base_path('.ai/guidelines/documentator.md'),
+        realpath($root.'/resources/ai/cursor/documentator.mdc') => base_path('.cursor/rules/documentator.mdc'),
+        realpath($root.'/resources/ai/gemini/documentator.md') => base_path('GEMINI.md'),
+        realpath($root.'/resources/ai/codex/documentator.md') => base_path('AGENTS.md'),
+    ]);
 });
 
 it('hides the docs when access is disabled', function () {

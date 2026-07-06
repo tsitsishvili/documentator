@@ -89,6 +89,16 @@ final class DocumentatorServiceProvider extends ServiceProvider
             $this->publishes([
                 __DIR__.'/../resources/views' => $this->app->resourcePath('views/vendor/documentator'),
             ], 'documentator-views');
+
+            // AI agent guidance for tools that don't auto-discover it via Laravel
+            // Boost (Boost reads resources/boost/** straight from the package).
+            $this->publishes([
+                __DIR__.'/../resources/boost/skills/documentator-api-docs' => $this->app->basePath('.claude/skills/documentator-api-docs'),
+                __DIR__.'/../resources/ai/guidelines/documentator.md' => $this->app->basePath('.ai/guidelines/documentator.md'),
+                __DIR__.'/../resources/ai/cursor/documentator.mdc' => $this->app->basePath('.cursor/rules/documentator.mdc'),
+                __DIR__.'/../resources/ai/gemini/documentator.md' => $this->app->basePath('GEMINI.md'),
+                __DIR__.'/../resources/ai/codex/documentator.md' => $this->app->basePath('AGENTS.md'),
+            ], 'documentator-ai');
         }
     }
 

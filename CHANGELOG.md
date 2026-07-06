@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.7.0] - 2026-07-06
+
+### Added
+
+- **AI agent guidance for consuming apps.** The package now ships instructions
+  that teach AI coding agents to write endpoints Documentator can document
+  automatically and to override with attributes only where needed. Laravel Boost
+  discovers them automatically on `boost:install` (an always-on guideline plus
+  the on-demand `documentator-api-docs` skill, under `resources/boost/`). Without
+  Boost, `php artisan vendor:publish --tag=documentator-ai` installs the same
+  guidance for Claude Code (`.claude/skills/`), Cursor (`.cursor/rules/`),
+  Gemini CLI (`GEMINI.md`), Codex (`AGENTS.md`) and any other agent
+  (`.ai/guidelines/`).
+
 ## [1.6.3] - 2026-07-05
 
 ### Security
@@ -349,7 +363,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (with a Scalar driver), Postman export, and the `documentator:generate`,
   `documentator:export` and `documentator:postman` commands.
 
-[Unreleased]: https://github.com/tsitsishvili/documentator/compare/v1.6.3...HEAD
+[Unreleased]: https://github.com/tsitsishvili/documentator/compare/v1.7.0...HEAD
+[1.7.0]: https://github.com/tsitsishvili/documentator/compare/v1.6.3...v1.7.0
 [1.6.3]: https://github.com/tsitsishvili/documentator/compare/v1.6.2...v1.6.3
 [1.6.2]: https://github.com/tsitsishvili/documentator/compare/v1.6.1...v1.6.2
 [1.6.1]: https://github.com/tsitsishvili/documentator/compare/v1.6.0...v1.6.1

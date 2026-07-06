@@ -105,6 +105,23 @@ and returns the modified array.
 Create the attribute class in `src/Attributes/` **and** handle it in
 `ExtractAttributes`. Repeatable attributes carry `Attribute::IS_REPEATABLE`.
 
+### AI agent guidance
+
+Guidance shipped for AI agents in consuming apps lives in two places:
+
+- `resources/boost/skills/documentator-api-docs/SKILL.md` — the deep, on-demand skill
+  (also published to `.claude/skills/` for non-Boost users). This is the single
+  source of truth for the detailed how-to.
+- The short always-on guideline, mirrored across five thin wrappers that differ
+  only in framing/frontmatter: `resources/boost/guidelines/core.blade.php`
+  (Boost), `resources/ai/guidelines/documentator.md` (generic),
+  `resources/ai/cursor/documentator.mdc` (Cursor),
+  `resources/ai/gemini/documentator.md` (Gemini CLI → `GEMINI.md`) and
+  `resources/ai/codex/documentator.md` (Codex → `AGENTS.md`).
+
+When endpoint behavior, an attribute, a command, or a config default changes,
+update the skill and keep the five short wrappers in sync.
+
 ## Coding conventions
 
 Full details are in [CODING_STANDARDS.md](CODING_STANDARDS.md). The essentials:
