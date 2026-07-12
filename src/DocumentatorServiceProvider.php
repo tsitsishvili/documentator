@@ -7,6 +7,7 @@ namespace Tsitsishvili\Documentator;
 use Illuminate\Contracts\Routing\Registrar as Router;
 use Illuminate\Support\ServiceProvider;
 use Tsitsishvili\Documentator\Commands\CheckCommand;
+use Tsitsishvili\Documentator\Commands\ExplainCommand;
 use Tsitsishvili\Documentator\Commands\ExportCommand;
 use Tsitsishvili\Documentator\Commands\GenerateCommand;
 use Tsitsishvili\Documentator\Commands\PostmanCommand;
@@ -80,7 +81,7 @@ final class DocumentatorServiceProvider extends ServiceProvider
         $this->registerRoutes($this->app->make('router'));
 
         if ($this->app->runningInConsole()) {
-            $this->commands([GenerateCommand::class, ExportCommand::class, PostmanCommand::class, CheckCommand::class]);
+            $this->commands([GenerateCommand::class, ExportCommand::class, PostmanCommand::class, CheckCommand::class, ExplainCommand::class]);
 
             $this->publishes([
                 __DIR__.'/../config/documentator.php' => $this->app->configPath('documentator.php'),

@@ -74,14 +74,9 @@ final class ResourceSchemaExtractor
             return self::OBJECT;
         }
 
-        $methodNode = $this->source->methodNode($method);
+        $return = $this->source->firstReturnExpression($method);
 
-        $return = $methodNode === null ? null : (new NodeFinder)->findFirst(
-            $methodNode,
-            fn (Node $node) => $node instanceof Node\Stmt\Return_ && $node->expr instanceof Node\Expr\Array_,
-        );
-
-        if (! $return instanceof Node\Stmt\Return_ || ! $return->expr instanceof Node\Expr\Array_) {
+        if (! $return instanceof Node\Expr) {
             return self::OBJECT;
         }
 
@@ -90,11 +85,11 @@ final class ResourceSchemaExtractor
         $previousDoc = $this->currentDocProps;
         $this->currentCasts = $model !== null ? $this->modelCasts($model) : [];
         $this->currentDocProps = $model !== null ? $this->modelDocProps($model) : [];
-        $properties = $this->properties($return->expr, $depth);
+        $schema = $this->schemaFromExpression($return, $resourceClass, $depth);
         $this->currentCasts = $previousCasts;
         $this->currentDocProps = $previousDoc;
 
-        return $properties === [] ? self::OBJECT : ['type' => 'object', 'properties' => $properties];
+        return $schema;
     }
 
     /**
@@ -179,7 +174,19 @@ final class ResourceSchemaExtractor
      */
     private function properties(Node\Expr\Array_ $array, int $depth): array
     {
+        return $this->objectSchema($array, $depth)['properties'] ?? [];
+    }
+
+    /**
+     * Build an object schema while keeping absence separate from nullability:
+     * unconditional keys are required; Laravel conditional helpers omit keys.
+     *
+     * @return array<string, mixed>
+     */
+    private function objectSchema(Node\Expr\Array_ $array, int $depth): array
+    {
         $properties = [];
+        $required = [];
 
         foreach ($array->items as $item) {
             if (! $item instanceof Node\ArrayItem) {
@@ -187,7 +194,9 @@ final class ResourceSchemaExtractor
             }
 
             if (! $item->key instanceof Scalar\String_) {
-                $properties = array_replace($properties, $this->mergedProperties($item->value, $depth));
+                $merged = $this->mergedSchema($item->value, $depth);
+                $properties = array_replace($properties, $merged['properties'] ?? []);
+                $required = array_values(array_unique(array_merge($required, $merged['required'] ?? [])));
 
                 continue;
             }
@@ -201,15 +210,136 @@ final class ResourceSchemaExtractor
                 $schema = $this->inferType($value, $depth) ?? $this->fallback($name);
             }
 
-            // A whenLoaded()/when() anywhere in the value means the field is optional.
-            if ($this->hasConditional($value)) {
-                $schema['nullable'] = true;
+            $schema = $this->withItemDocumentation($schema, $item);
+
+            if (! $this->hasConditional($value)) {
+                $required[] = $name;
             }
 
             $properties[$name] = $schema;
         }
 
-        return $properties;
+        $schema = ['type' => 'object', 'properties' => $properties];
+
+        if ($required !== []) {
+            $schema['required'] = array_values(array_unique($required));
+        }
+
+        return $schema;
+    }
+
+    /**
+     * Apply a small PHPDoc vocabulary directly above a Resource field.
+     * Free text becomes the description; @var and @example refine its schema.
+     *
+     * @param  array<string, mixed>  $schema
+     * @return array<string, mixed>
+     */
+    private function withItemDocumentation(array $schema, Node\ArrayItem $item): array
+    {
+        $comment = $item->getDocComment()?->getText();
+
+        if (! is_string($comment)) {
+            return $schema;
+        }
+
+        $text = preg_replace('/^\/\*\*|\*\/$/', '', trim($comment)) ?? '';
+        $lines = array_map(
+            static fn (string $line): string => trim(preg_replace('/^\s*\*\s?/', '', $line) ?? ''),
+            preg_split('/\R/', $text) ?: [],
+        );
+        $text = trim(implode("\n", array_filter($lines, static fn (string $line): bool => $line !== '')));
+
+        if (preg_match('/@var\s+(.+?)(?=\s+@[A-Za-z]|$)/s', $text, $matches) === 1) {
+            $documented = TypeStringParser::parse(trim($matches[1]));
+
+            if ($documented !== null) {
+                $schema = $documented;
+            }
+        }
+
+        if (preg_match('/@example\s+(.+?)(?=\s+@[A-Za-z]|$)/s', $text, $matches) === 1) {
+            $schema['example'] = $this->documentedValue(trim($matches[1]));
+        }
+
+        $description = trim((string) preg_replace('/\s*@[A-Za-z][A-Za-z0-9_-]*(?:\s+.*)?$/s', '', $text));
+
+        if ($description !== '') {
+            $schema['description'] = $description;
+        }
+
+        return $schema;
+    }
+
+    private function documentedValue(string $value): mixed
+    {
+        try {
+            return json_decode($value, true, flags: JSON_THROW_ON_ERROR);
+        } catch (Throwable) {
+            return trim($value, "'\"");
+        }
+    }
+
+    /**
+     * Resolve top-level Resource composition without executing application code.
+     *
+     * @return array<string, mixed>
+     */
+    private function schemaFromExpression(Node\Expr $expr, string $resourceClass, int $depth): array
+    {
+        if ($expr instanceof Node\Expr\Array_) {
+            return $this->objectSchema($expr, $depth);
+        }
+
+        if ($expr instanceof Node\Expr\FuncCall
+            && $expr->name instanceof Node\Name
+            && strtolower($expr->name->toString()) === 'array_merge') {
+            $schema = self::OBJECT;
+
+            foreach ($expr->args as $arg) {
+                if (! $arg instanceof Node\Arg) {
+                    continue;
+                }
+
+                $part = $this->composedPartSchema($arg->value, $resourceClass, $depth);
+                $schema['properties'] = array_replace($schema['properties'] ?? [], $part['properties'] ?? []);
+                $schema['required'] = array_values(array_unique(array_merge($schema['required'] ?? [], $part['required'] ?? [])));
+            }
+
+            if (($schema['properties'] ?? []) === []) {
+                return self::OBJECT;
+            }
+
+            if (($schema['required'] ?? []) === []) {
+                unset($schema['required']);
+            }
+
+            return $schema;
+        }
+
+        return self::OBJECT;
+    }
+
+    /** @return array<string, mixed> */
+    private function composedPartSchema(Node\Expr $expr, string $resourceClass, int $depth): array
+    {
+        if ($expr instanceof Node\Expr\Array_) {
+            return $this->objectSchema($expr, $depth);
+        }
+
+        if ($expr instanceof Node\Expr\StaticCall
+            && $expr->class instanceof Node\Name
+            && strtolower($expr->class->toString()) === 'parent'
+            && $expr->name instanceof Node\Identifier
+            && $expr->name->toString() === 'toArray') {
+            $parent = get_parent_class($resourceClass);
+
+            return is_string($parent) && is_subclass_of($parent, JsonResource::class)
+                ? $this->extract($parent, $depth + 1)
+                : self::OBJECT;
+        }
+
+        return self::OBJECT;
     }
 
     /**
@@ -415,11 +545,12 @@ final class ResourceSchemaExtractor
     }
 
     /**
-     * Inline fields from mergeWhen([...]) / merge([...]) blocks.
+     * Inline fields from mergeWhen([...]) / merge([...]) blocks, including
+     * whether those fields are guaranteed to be present.
      *
-     * @return array<string, array<string, mixed>>
+     * @return array<string, mixed>
      */
-    private function mergedProperties(Node\Expr $expr, int $depth): array
+    private function mergedSchema(Node\Expr $expr, int $depth): array
     {
         if (! $expr instanceof Node\Expr\MethodCall || ! $expr->name instanceof Node\Identifier) {
             return [];
@@ -439,15 +570,13 @@ final class ResourceSchemaExtractor
             $array = $this->arrayFromExpression($arg->value);
 
             if ($array instanceof Node\Expr\Array_) {
-                $properties = $this->properties($array, $depth);
+                $schema = $this->objectSchema($array, $depth);
 
-                if ($this->hasConditional($expr)) {
-                    foreach ($properties as &$schema) {
-                        $schema['nullable'] = true;
-                    }
+                if ($method === 'mergewhen') {
+                    unset($schema['required']);
                 }
 
-                return $properties;
+                return $schema;
             }
         }
 
@@ -492,9 +621,7 @@ final class ResourceSchemaExtractor
         }
 
         if ($hasStringKey) {
-            $properties = $this->properties($array, $depth);
-
-            return $properties === [] ? self::OBJECT : ['type' => 'object', 'properties' => $properties];
+            return $this->objectSchema($array, $depth);
         }
 
         return ['type' => 'array', 'items' => $this->listItemSchema($array, $depth)];

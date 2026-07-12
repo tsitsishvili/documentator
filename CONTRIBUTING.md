@@ -139,8 +139,9 @@ Full details are in [CODING_STANDARDS.md](CODING_STANDARDS.md). The essentials:
 - Add tests under `tests/Feature/`.
 - Define throwaway controllers / FormRequests / Resources / models / Data objects
   at the top of the test file.
-- Use real `[Controller::class, 'method']` routes — **closure routes skip the
-  reflection-based strategies**, so they won't exercise extraction.
+- Prefer real `[Controller::class, 'method']` routes when testing controller or
+  class metadata. Use closures deliberately when exercising the supported
+  closure reflection path.
 - UI asset changes should include or update a browser test under `tests/Browser/`.
 - Every behavior change or bug fix should come with a test.
 

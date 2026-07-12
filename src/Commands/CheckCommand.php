@@ -24,6 +24,7 @@ final class CheckCommand extends Command
     protected $signature = 'documentator:check
         {--strict : Exit non-zero when any documentation issue is found}
         {--against= : Path to a committed OpenAPI JSON; fail if the generated spec drifts from it}
+        {--fail-on=any : Drift policy: any or breaking}
         {--json : Emit machine-readable JSON for CI dashboards}
         {--suggest-hidden : Suggest suspicious internal routes that may belong behind #[Hidden] or route excludes}';
 
@@ -31,6 +32,12 @@ final class CheckCommand extends Command
 
     public function handle(Documentator $documentator, OpenApiGenerator $generator): int
     {
+        if (! in_array($this->failOn(), ['any', 'breaking'], true)) {
+            $this->error('--fail-on must be either "any" or "breaking".');
+
+            return self::FAILURE;
+        }
+
         $endpoints = $documentator->endpoints();
         $spec = $generator->generate($endpoints);
         $issues = $this->audit($endpoints);
@@ -41,8 +48,7 @@ final class CheckCommand extends Command
 
         if ($this->option('json')) {
             $failed = $validationErrors !== []
-                || $drift['drifted']
-                || $drift['missing']
+                || $drift['should_fail']
                 || ($issues !== [] && $this->option('strict'));
 
             $this->line((string) json_encode([
@@ -75,7 +81,7 @@ final class CheckCommand extends Command
         }
 
         if ($validationErrors === []) {
-            $this->info('OpenAPI document is valid.');
+            $this->info('Documentator OpenAPI checks passed.');
         } else {
             $this->newLine();
             $this->error(count($validationErrors).' OpenAPI validation error(s) found.');
@@ -84,7 +90,7 @@ final class CheckCommand extends Command
         $this->reportHiddenSuggestions($hiddenSuggestions);
         $this->reportDriftResult($drift);
 
-        if ($validationErrors !== [] || $drift['drifted'] || $drift['missing'] || ($issues !== [] && $this->option('strict'))) {
+        if ($validationErrors !== [] || $drift['should_fail'] || ($issues !== [] && $this->option('strict'))) {
             return self::FAILURE;
         }
 
@@ -241,13 +247,17 @@ final class CheckCommand extends Command
     private function drift(array $actualSpec): array
     {
         $path = $this->option('against');
+        $failOn = $this->failOn();
 
         if ($path === null) {
             return [
                 'checked' => false,
                 'path' => null,
+                'fail_on' => $failOn,
                 'missing' => false,
                 'drifted' => false,
+                'breaking' => false,
+                'should_fail' => false,
                 'changes' => [],
             ];
         }
@@ -256,8 +266,11 @@ final class CheckCommand extends Command
             return [
                 'checked' => true,
                 'path' => $path,
+                'fail_on' => $failOn,
                 'missing' => true,
                 'drifted' => true,
+                'breaking' => true,
+                'should_fail' => true,
                 'changes' => [],
             ];
         }
@@ -266,19 +279,31 @@ final class CheckCommand extends Command
         $expected = json_encode($expectedSpec);
         $actual = json_encode($actualSpec);
 
+        $drifted = $expected !== $actual;
+        $changes = $drifted
+            ? OpenApiDiff::compare(is_array($expectedSpec) ? $expectedSpec : [], $actualSpec)
+            : [];
+        $breaking = collect($changes)->contains(fn (array $change): bool => $change['severity'] === 'breaking');
+
         return [
             'checked' => true,
             'path' => $path,
+            'fail_on' => $failOn,
             'missing' => false,
-            'drifted' => $expected !== $actual,
-            'changes' => $expected !== $actual
-                ? OpenApiDiff::compare(is_array($expectedSpec) ? $expectedSpec : [], $actualSpec)
-                : [],
+            'drifted' => $drifted,
+            'breaking' => $breaking,
+            'should_fail' => $drifted && ($failOn === 'any' || $breaking),
+            'changes' => $changes,
         ];
     }
 
+    private function failOn(): string
+    {
+        return strtolower((string) ($this->option('fail-on') ?: 'any'));
+    }
+
     /**
-     * @param  array{checked: bool, path: string|null, missing: bool, drifted: bool, changes: array<int, array<string, string>>}  $drift
+     * @param  array{checked: bool, path: string|null, fail_on: string, missing: bool, drifted: bool, breaking: bool, should_fail: bool, changes: array<int, array<string, string>>}  $drift
      */
     private function reportDriftResult(array $drift): void
     {
@@ -293,7 +318,11 @@ final class CheckCommand extends Command
         }
 
         if ($drift['drifted']) {
-            $this->error("Generated spec has drifted from {$drift['path']}. Re-run documentator:export and commit the result.");
+            if ($drift['should_fail']) {
+                $this->error("Generated spec has drifted from {$drift['path']}. Re-run documentator:export and commit the result.");
+            } else {
+                $this->warn("Generated spec has non-breaking drift from {$drift['path']}; allowed by --fail-on=breaking.");
+            }
             $this->reportDriftChanges($drift['changes']);
 
             return;

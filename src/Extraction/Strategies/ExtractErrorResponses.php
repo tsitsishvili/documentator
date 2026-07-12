@@ -9,8 +9,6 @@ use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Routing\Route;
 use PhpParser\Node;
 use PhpParser\NodeFinder;
-use PhpParser\Parser;
-use PhpParser\ParserFactory;
 use ReflectionFunctionAbstract;
 use ReflectionMethod;
 use ReflectionNamedType;
@@ -21,6 +19,7 @@ use Tsitsishvili\Documentator\Data\ResponseData;
 use Tsitsishvili\Documentator\Extraction\ExtractionStrategy;
 use Tsitsishvili\Documentator\Extraction\Support\InlineValidationRulesExtractor;
 use Tsitsishvili\Documentator\Extraction\Support\RouteActionReflection;
+use Tsitsishvili\Documentator\Extraction\Support\SourceAnalyzer;
 
 /**
  * Adds the conventional error responses an endpoint can return without anyone
@@ -38,12 +37,10 @@ use Tsitsishvili\Documentator\Extraction\Support\RouteActionReflection;
  */
 final class ExtractErrorResponses implements ExtractionStrategy
 {
-    private readonly Parser $parser;
-
-    public function __construct(private readonly InlineValidationRulesExtractor $inlineValidation)
-    {
-        $this->parser = (new ParserFactory)->createForHostVersion();
-    }
+    public function __construct(
+        private readonly InlineValidationRulesExtractor $inlineValidation,
+        private readonly SourceAnalyzer $source,
+    ) {}
 
     public function __invoke(EndpointData $endpoint, Route $route, ?ReflectionMethod $method): EndpointData
     {
@@ -59,6 +56,10 @@ final class ExtractErrorResponses implements ExtractionStrategy
 
         if ($action === null) {
             return $endpoint;
+        }
+
+        foreach ($this->controlFlowStatuses($action) as $status) {
+            $endpoint->responses[$status] ??= $this->messageResponse($status, $this->description($status));
         }
 
         $formRequest = $this->findFormRequest($action);
@@ -165,30 +166,176 @@ final class ExtractErrorResponses implements ExtractionStrategy
 
     private function methodNode(ReflectionMethod $method): ?Node\Stmt\ClassMethod
     {
-        $file = $method->getFileName();
+        return $this->source->methodNode($method);
+    }
 
-        if ($file === false) {
+    /** @return array<int, int> */
+    private function controlFlowStatuses(ReflectionFunctionAbstract $action): array
+    {
+        $node = $this->source->functionLikeNode($action);
+
+        if ($node === null) {
+            return [];
+        }
+
+        $statuses = [];
+
+        foreach ((new NodeFinder)->findInstanceOf($node, Node\Expr\FuncCall::class) as $call) {
+            if (! $call instanceof Node\Expr\FuncCall || ! $call->name instanceof Node\Name) {
+                continue;
+            }
+
+            $name = strtolower($call->name->getLast());
+            $index = $name === 'abort' ? 0 : (in_array($name, ['abort_if', 'abort_unless'], true) ? 1 : null);
+
+            if ($index !== null && ($status = $this->statusValue($call->args[$index]->value ?? null)) !== null) {
+                $statuses[] = $status;
+            }
+        }
+
+        foreach ((new NodeFinder)->find($node, fn (Node $candidate): bool => $candidate instanceof Node\Expr\MethodCall || $candidate instanceof Node\Expr\StaticCall) as $call) {
+            if (! $call instanceof Node\Expr\MethodCall && ! $call instanceof Node\Expr\StaticCall) {
+                continue;
+            }
+
+            if (! $call->name instanceof Node\Identifier) {
+                continue;
+            }
+
+            $method = strtolower($call->name->toString());
+
+            if ($call instanceof Node\Expr\MethodCall
+                && $call->var instanceof Node\Expr\Variable
+                && $call->var->name === 'this'
+                && in_array($method, ['authorize', 'authorizeforuser'], true)) {
+                $statuses[] = 403;
+            }
+
+            if ($call instanceof Node\Expr\StaticCall
+                && $call->class instanceof Node\Name
+                && strtolower($call->class->getLast()) === 'gate'
+                && in_array($method, ['authorize', 'allowif', 'denyif'], true)) {
+                $statuses[] = 403;
+            }
+        }
+
+        foreach ((new NodeFinder)->findInstanceOf($node, Node\Expr\Throw_::class) as $throw) {
+            if ($throw instanceof Node\Expr\Throw_ && ($status = $this->thrownStatus($throw->expr)) !== null) {
+                $statuses[] = $status;
+            }
+        }
+
+        return array_values(array_unique(array_filter(
+            $statuses,
+            static fn (int $status): bool => $status >= 400 && $status <= 599,
+        )));
+    }
+
+    private function thrownStatus(Node\Expr $expr): ?int
+    {
+        if ($expr instanceof Node\Expr\MethodCall) {
+            if ($expr->name instanceof Node\Identifier && strtolower($expr->name->toString()) === 'asnotfound') {
+                return 404;
+            }
+
+            $expr = $expr->var;
+        }
+
+        if (! $expr instanceof Node\Expr\New_ || ! $expr->class instanceof Node\Name) {
             return null;
         }
 
+        $class = $expr->class->toString();
+        $short = strtolower($expr->class->getLast());
+
+        if ($short === 'httpexception') {
+            return $this->statusValue($expr->args[0]->value ?? null);
+        }
+
+        $known = [
+            'badrequesthttpexception' => 400,
+            'authenticationexception' => 401,
+            'unauthorizedhttpexception' => 401,
+            'authorizationexception' => 403,
+            'accessdeniedhttpexception' => 403,
+            'notfoundhttpexception' => 404,
+            'modelnotfoundexception' => 404,
+            'methodnotallowedhttpexception' => 405,
+            'notacceptablehttpexception' => 406,
+            'requesttimeouthttpexception' => 408,
+            'conflicthttpexception' => 409,
+            'gonehttpexception' => 410,
+            'lengthrequiredhttpexception' => 411,
+            'preconditionfailedhttpexception' => 412,
+            'payloadtoolargehttpexception' => 413,
+            'unsupportedmediatypehttpexception' => 415,
+            'validationexception' => 422,
+            'unprocessableentityhttpexception' => 422,
+            'lockedhttpexception' => 423,
+            'preconditionrequiredhttpexception' => 428,
+            'toomanyrequestshttpexception' => 429,
+            'serviceunavailablehttpexception' => 503,
+        ];
+
+        if (isset($known[$short])) {
+            return $known[$short];
+        }
+
         try {
-            $ast = $this->parser->parse((string) file_get_contents($file));
+            if (is_a($class, 'Symfony\\Component\\HttpKernel\\Exception\\HttpExceptionInterface', true)) {
+                return $this->statusValue($expr->args[0]->value ?? null);
+            }
         } catch (Throwable) {
             return null;
         }
 
-        if ($ast === null) {
-            return null;
+        return null;
+    }
+
+    private function statusValue(?Node\Expr $expr): ?int
+    {
+        if ($expr instanceof Node\Scalar\Int_) {
+            return $expr->value;
         }
 
-        $node = (new NodeFinder)->findFirst(
-            $ast,
-            fn (Node $node) => $node instanceof Node\Stmt\ClassMethod
-                && $node->name->toString() === $method->getName()
-                && $node->getStartLine() === $method->getStartLine(),
-        );
+        if ($expr instanceof Node\Expr\ClassConstFetch
+            && $expr->class instanceof Node\Name
+            && $expr->name instanceof Node\Identifier) {
+            $constant = ltrim($expr->class->toString(), '\\').'::'.$expr->name->toString();
 
-        return $node instanceof Node\Stmt\ClassMethod ? $node : null;
+            if (defined($constant)) {
+                $value = constant($constant);
+
+                return is_int($value) ? $value : null;
+            }
+        }
+
+        return null;
+    }
+
+    private function description(int $status): string
+    {
+        return match ($status) {
+            400 => 'Bad request',
+            401 => 'Unauthenticated',
+            403 => 'Forbidden',
+            404 => 'Not found',
+            405 => 'Method not allowed',
+            406 => 'Not acceptable',
+            408 => 'Request timeout',
+            409 => 'Conflict',
+            410 => 'Gone',
+            411 => 'Length required',
+            412 => 'Precondition failed',
+            413 => 'Payload too large',
+            415 => 'Unsupported media type',
+            422 => 'Validation error',
+            423 => 'Locked',
+            428 => 'Precondition required',
+            429 => 'Too many requests',
+            503 => 'Service unavailable',
+            default => "HTTP {$status} error",
+        };
     }
 
     /**

@@ -39,7 +39,7 @@ Runtime flow:
 |-----------------------------|----------------------------------------------|-----------------------------------------------------------------------------------------------------------------------|
 | Collect Laravel routes      | `src/Extraction/RouteCollector.php`          | Filters registered routes by `documentator.routes.match`, `exclude`, and `exclude_middleware`.                        |
 | Create endpoint accumulator | `src/Data/EndpointData.php`                  | Mutable object that all strategies enrich. It also creates default operation IDs.                                     |
-| Run strategies              | `src/Extraction/ExtractorPipeline.php`       | Reflects the route action, then invokes each strategy in service-provider order.                                      |
+| Run strategies              | `src/Extraction/ExtractorPipeline.php`       | Reflects the route action, invokes each strategy in order, and records per-facet provenance for `documentator:explain`. |
 | Convert to OpenAPI          | `src/OpenApi/OpenApiGenerator.php`           | Builds `info`, `servers`, `tags`, `paths`, parameters, request bodies, responses, security, examples, and components. |
 | Serve OpenAPI               | `src/Http/Controllers/OpenApiController.php` | Returns generated JSON, cached JSON, or a section-filtered spec.                                                      |
 | Serve docs UI               | `src/Http/Controllers/DocsController.php`    | Chooses built-in UI vs Scalar and passes spec/asset URLs to the Blade view.                                           |
@@ -60,7 +60,7 @@ override inferred values.
 | Spatie Query Builder | `src/Extraction/Strategies/ExtractSpatieQueryBuilder.php`    | Query params from `allowedFilters`, `allowedSorts`, `allowedIncludes`, `allowedFields`, and `defaultSort`.                                            |
 | Return responses     | `src/Extraction/Strategies/ExtractResponses.php`             | Success responses from API Resource, ResourceCollection, model, collection, and paginator return shapes.                                              |
 | Inline responses     | `src/Extraction/Strategies/ExtractInlineResponses.php`       | Success responses from literal inline JSON responses like `response()->json([...], 202)`.                                                             |
-| Error responses      | `src/Extraction/Strategies/ExtractErrorResponses.php`        | Conventional 401, 403, 404, and 422 responses from auth, FormRequest authorization, route model binding, and validation.                              |
+| Error responses      | `src/Extraction/Strategies/ExtractErrorResponses.php`        | Conventional and control-flow errors from auth, validation, model binding, `abort*`, Gate/controller authorization, and recognized HTTP exceptions. |
 | Attributes           | `src/Extraction/Strategies/ExtractAttributes.php`            | Explicit overrides from `#[Summary]`, `#[Description]`, `#[Response]`, params, auth, grouping, servers, hidden/deprecated flags, and headers.         |
 
 ## Extraction Helpers
@@ -76,7 +76,7 @@ override inferred values.
 
 | File                         | Represents                                                                                                                          |
 |------------------------------|-------------------------------------------------------------------------------------------------------------------------------------|
-| `src/Data/EndpointData.php`  | One documented endpoint: route metadata, grouped params, request body, responses, auth, servers, grouping, hidden/deprecated state. |
+| `src/Data/EndpointData.php`  | One documented endpoint: route metadata, grouped params, request body, responses, auth, servers, grouping, visibility, and internal provenance trace. |
 | `src/Data/ParameterData.php` | One path/query/header/cookie/body parameter. `schema` wins over scalar `type` when present.                                         |
 | `src/Data/ResponseData.php`  | One response status, including description, example, resource/type/schema, media type, headers, and reusable schema name.           |
 
@@ -141,6 +141,7 @@ Commands are registered in `src/DocumentatorServiceProvider.php`.
 | `documentator:export`   | `src/Commands/ExportCommand.php`   | Writes the generated OpenAPI document to a chosen JSON path.                                                                  |
 | `documentator:postman`  | `src/Commands/PostmanCommand.php`  | Writes a Postman Collection generated from OpenAPI.                                                                           |
 | `documentator:check`    | `src/Commands/CheckCommand.php`    | Audits docs quality, validates the emitted OpenAPI shape, suggests hidden routes, and detects drift against a committed spec. |
+| `documentator:explain`  | `src/Commands/ExplainCommand.php`  | Shows which extraction strategies inferred or overrode every documented facet for one operation.                       |
 
 ## Postman And Validation Support
 

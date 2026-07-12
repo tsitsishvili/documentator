@@ -43,6 +43,29 @@ class ConditionalThingResource extends JsonResource
     }
 }
 
+class ComposedBaseResource extends JsonResource
+{
+    public function toArray($request): array
+    {
+        return [
+            /** Stable database identifier. @example 42 */
+            'id' => $this->id,
+        ];
+    }
+}
+
+class ComposedChildResource extends ComposedBaseResource
+{
+    public function toArray($request): array
+    {
+        return array_merge(parent::toArray($request), [
+            /** Human-readable label. */
+            'label' => $this->label,
+            'optional_note' => $this->whenNotNull($this->optional_note),
+        ]);
+    }
+}
+
 class LiteralArrayThingResource extends JsonResource
 {
     public function toArray($request): array
@@ -204,11 +227,22 @@ it('reads merged and conditional resource fields', function () {
     $schema = app(ResourceSchemaExtractor::class)->extract(ConditionalThingResource::class);
     $props = $schema['properties'];
 
-    expect($props['secret']['nullable'])->toBeTrue()
+    expect($schema['required'])->toBe(['id'])
+        ->and($props['secret'])->not->toHaveKey('nullable')
         ->and($props['comments_count']['type'])->toBe('integer')
-        ->and($props['comments_count']['nullable'])->toBeTrue()
+        ->and($props['comments_count'])->not->toHaveKey('nullable')
         ->and($props['profile']['properties']['name']['type'])->toBe('string')
-        ->and($props['profile']['nullable'])->toBeTrue();
+        ->and($props['profile'])->not->toHaveKey('nullable');
+});
+
+it('keeps requiredness and field docs through composed resources', function () {
+    $schema = app(ResourceSchemaExtractor::class)->extract(ComposedChildResource::class);
+
+    expect($schema['required'])->toEqualCanonicalizing(['id', 'label'])
+        ->and($schema['required'])->not->toContain('optional_note')
+        ->and($schema['properties']['id']['description'])->toBe('Stable database identifier.')
+        ->and($schema['properties']['id']['example'])->toBe(42)
+        ->and($schema['properties']['label']['description'])->toBe('Human-readable label.');
 });
 
 it('infers list item schemas from literal resource arrays', function () {
