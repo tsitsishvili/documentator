@@ -36,10 +36,51 @@ final class ExtractInlineResponses implements ExtractionStrategy
         }
 
         foreach ($this->responsesFor($action) as $response) {
-            $endpoint->responses[$response->status] ??= $response;
+            if (! isset($endpoint->responses[$response->status])) {
+                $endpoint->responses[$response->status] = $response;
+
+                continue;
+            }
+
+            $this->mergeResponse($endpoint->responses[$response->status], $response);
         }
 
         return $endpoint;
+    }
+
+    private function mergeResponse(ResponseData $existing, ResponseData $additional): void
+    {
+        if ($additional->schema === null) {
+            return;
+        }
+
+        if ($existing->schema === null) {
+            $existing->schema = $additional->schema;
+            $existing->mediaType ??= $additional->mediaType;
+
+            return;
+        }
+
+        if (($existing->mediaType ?? 'application/json') !== ($additional->mediaType ?? 'application/json')) {
+            return;
+        }
+
+        $schemas = isset($existing->schema['oneOf']) && is_array($existing->schema['oneOf'])
+            ? $existing->schema['oneOf']
+            : [$existing->schema];
+        $schemas[] = $additional->schema;
+        $unique = [];
+
+        foreach ($schemas as $schema) {
+            if (is_array($schema)) {
+                $unique[serialize($schema)] = $schema;
+            }
+        }
+
+        if (count($unique) > 1) {
+            $existing->schema = ['oneOf' => array_values($unique)];
+            $existing->schemaName = null;
+        }
     }
 
     /**

@@ -3,7 +3,11 @@
 declare(strict_types=1);
 
 use Illuminate\Support\Facades\Route;
+use Spatie\LaravelData\Attributes\MapInputName;
+use Spatie\LaravelData\Attributes\MapOutputName;
 use Spatie\LaravelData\Data;
+use Spatie\LaravelData\Lazy;
+use Spatie\LaravelData\Optional;
 use Tsitsishvili\Documentator\Documentator;
 
 enum DataStatus: string
@@ -38,6 +42,17 @@ class UserData extends Data
     ) {}
 }
 
+class MappedUserData extends Data
+{
+    public function __construct(
+        #[MapInputName('first_name')]
+        #[MapOutputName('display_name')]
+        public string $name,
+        public string|Optional $nickname,
+        public string|Lazy $biography,
+    ) {}
+}
+
 class DataObjectController
 {
     public function store(CreateUserData $data): UserData
@@ -48,6 +63,11 @@ class DataObjectController
     public function search(CreateUserData $data): void
     {
         //
+    }
+
+    public function mapped(MappedUserData $data): MappedUserData
+    {
+        return $data;
     }
 }
 
@@ -81,4 +101,19 @@ it('routes Data params to the query string on GET', function () {
     expect($op)->not->toHaveKey('requestBody')
         ->and($byName)->toHaveKeys(['name', 'status'])
         ->and($byName['status']['in'])->toBe('query');
+});
+
+it('honors Data input/output names and optional or lazy properties', function () {
+    Route::post('api/mapped-data-users', [DataObjectController::class, 'mapped']);
+
+    $operation = app(Documentator::class)->toOpenApi()['paths']['/api/mapped-data-users']['post'];
+    $request = $operation['requestBody']['content']['application/json']['schema'];
+    $response = $operation['responses']['201']['content']['application/json']['schema'];
+
+    expect($request['properties'])->toHaveKeys(['first_name', 'nickname', 'biography'])
+        ->and($request['properties'])->not->toHaveKey('name')
+        ->and($request['required'])->toBe(['first_name'])
+        ->and($response['properties'])->toHaveKeys(['display_name', 'nickname', 'biography'])
+        ->and($response['properties'])->not->toHaveKey('name')
+        ->and($response['required'])->toBe(['display_name']);
 });

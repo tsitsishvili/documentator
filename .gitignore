@@ -27,6 +27,7 @@ Thumbs.db
 /build/
 /.cache/
 /test-results/
+/.phpstan/
 
 # Logs and temporary files
 *.log

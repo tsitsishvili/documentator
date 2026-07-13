@@ -7,6 +7,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.8.0] - 2026-07-13
+
+### Added
+
+- **PHP 8.5 support.** The test matrix now runs on PHP 8.5 alongside 8.2–8.4.
+  The existing `^8.2` constraint already permitted 8.5; no consumer changes are
+  required.
+- **Explainable inference.** `documentator:explain METHOD URI` shows the ordered
+  strategy trace behind every documented field, parameter and response; `--json`
+  provides the same provenance for tooling.
+- **Breaking-only contract gates.** `documentator:check --against=<spec>
+  --fail-on=breaking` allows additive drift while still failing on breaking
+  changes. Semantic comparison now follows local schema references and covers
+  nullability, bounds, patterns, composites, additional properties, response
+  headers, and security scopes.
+- **Control-flow error responses.** Literal `abort`, `abort_if` and
+  `abort_unless` calls, controller/Gate authorization, and recognized Laravel or
+  Symfony HTTP exceptions contribute their possible 4xx/5xx responses.
+
+### Changed
+
+- **More accurate Resource schemas.** Unconditional Resource fields are marked
+  required while `when*`/`mergeWhen` fields are optional instead of nullable.
+  `array_merge(parent::toArray(), [...])` composition and field descriptions,
+  `@var` types, and `@example` values are preserved.
+- **Deeper Spatie Data schemas.** Input/output name mapping and `Optional`/`Lazy`
+  unions now affect property names and requiredness.
+- **Multiple same-status response branches.** Distinct inline response shapes
+  sharing a status code are emitted under `oneOf` instead of silently keeping
+  only the first branch.
+- **Accurate validator wording.** The lightweight built-in validation result is
+  reported as Documentator OpenAPI checks, not as full OpenAPI validity.
+
+## [1.7.1] - 2026-07-06
+
+### Changed
+
+- **Completed Composer package metadata.** Declared the package type and
+  maintainer details and expanded the formatted keyword list used by package
+  registries.
+
 ## [1.7.0] - 2026-07-06
 
 ### Added
@@ -363,7 +404,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (with a Scalar driver), Postman export, and the `documentator:generate`,
   `documentator:export` and `documentator:postman` commands.
 
-[Unreleased]: https://github.com/tsitsishvili/documentator/compare/v1.7.0...HEAD
+[Unreleased]: https://github.com/tsitsishvili/documentator/compare/v1.8.0...HEAD
+[1.8.0]: https://github.com/tsitsishvili/documentator/compare/v1.7.1...v1.8.0
+[1.7.1]: https://github.com/tsitsishvili/documentator/compare/v1.7.0...v1.7.1
 [1.7.0]: https://github.com/tsitsishvili/documentator/compare/v1.6.3...v1.7.0
 [1.6.3]: https://github.com/tsitsishvili/documentator/compare/v1.6.2...v1.6.3
 [1.6.2]: https://github.com/tsitsishvili/documentator/compare/v1.6.1...v1.6.2

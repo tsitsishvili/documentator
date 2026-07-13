@@ -52,6 +52,8 @@ annotation**. This is the primary way to get good docs.
 | Success response                 | Give the method a **return type**: an API `Resource`, `ResourceCollection`, model, or `Data` object.    |
 | Paginated response + page params | `return ResourceClass::collection($query->paginate())` — envelope + `page`/`per_page` are inferred.      |
 | Literal JSON response            | `return response()->json([...], 202)` — shape and status are read from the literal.                     |
+| Multiple response branches       | Return distinct literal shapes from branches — same-status variants become an OpenAPI `oneOf`.          |
+| Control-flow errors              | Literal `abort*`, controller/Gate authorization, and HTTP exceptions add possible error responses.         |
 | Filters / sorts / includes       | `spatie/laravel-query-builder`: literal `allowedFilters()`, `allowedSorts()`, `allowedIncludes()`.      |
 
 A fully self-documenting endpoint needs no attributes at all:
@@ -73,8 +75,12 @@ public function store(StoreOrderRequest $request): OrderResource
 Notes that change the output:
 
 - **Status codes** follow the verb: `POST → 201`, `DELETE → 204`, otherwise `200`.
-- **Error responses** (401/403/404/422) are added automatically from the endpoint's
-  shape (auth middleware, `authorize()`, model binding, validation).
+- **Error responses** are added automatically from endpoint shape and readable
+  control flow: auth middleware, `authorize()`/Gate, model binding, validation,
+  literal `abort*` calls, and recognized Laravel/Symfony HTTP exceptions.
+- API Resource fields that are unconditional become required; `when*` and
+  `mergeWhen` fields remain optional rather than being treated as nullable.
+- Spatie Data respects mapped input/output names and `Optional`/`Lazy` unions.
 - **Validation rules** are parsed richly: `in:`/`Rule::enum`/`Rule::in` → enum,
   `email`/`uuid`/`date` → format, `min`/`max` → bounds, `regex:` → pattern,
   `confirmed` → a `_confirmation` field, `nested.*.field` → nested schema,
@@ -140,6 +146,8 @@ work on the class or a Data/Action class).
 ```bash
 php artisan documentator:check                         # audit docs quality + validate the OpenAPI shape
 php artisan documentator:check --against=openapi.json  # fail if the generated spec drifted from a committed spec
+php artisan documentator:check --against=openapi.json --fail-on=breaking # allow additive drift
+php artisan documentator:explain GET /api/orders       # trace every inferred/overridden fact
 php artisan documentator:generate                      # build & cache the spec (pair with DOCUMENTATOR_CACHE=true in production)
 php artisan documentator:export path/to/openapi.json   # write the spec to a file
 php artisan documentator:postman                       # export a Postman collection
@@ -151,9 +159,9 @@ when CI should fail on drift from a committed spec.
 
 ## Gotchas that trip agents
 
-- **Closure routes skip reflection-based inference.** Only `[Controller::class, 'method']`
-  routes get FormRequest/return-type/attribute extraction. Prefer controller
-  actions for anything that should be documented richly.
+- **Controller routes provide the richest metadata.** Typed closures are still
+  analyzed for parameters, attributes and return expressions, but they have no
+  controller name/class docblock for grouping or inherited metadata.
 - **GET/HEAD FormRequest rules become query parameters**, not a request body.
 - **One source per fact.** Inference fills gaps non-destructively; an attribute
   overrides. Don't set the same thing two ways.
@@ -166,7 +174,8 @@ when CI should fail on drift from a committed spec.
 
 ## Quick checklist for a new/edited endpoint
 
-1. Controller action (not a closure), under the documented prefix.
+1. Prefer a controller action under the documented prefix; use a typed closure
+   when controller/class metadata is not needed.
 2. Docblock: first line summary, rest description.
 3. Request: a type-hinted `FormRequest` (or inline `validate()` / `Data` object).
 4. Response: a concrete **return type** (Resource / model / `Data` / paginator).

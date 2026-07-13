@@ -81,6 +81,28 @@ it('detects drift from a committed spec', function () {
     @unlink($path);
 });
 
+it('can allow additive drift while still failing on breaking drift', function () {
+    Route::get('api/checked', [CheckedController::class, 'index']);
+    $path = sys_get_temp_dir().'/documentator-breaking-check-'.uniqid().'.json';
+
+    $this->artisan('documentator:export', ['path' => $path])->assertExitCode(0);
+
+    Route::get('api/checked-added', [CheckedController::class, 'index']);
+    $this->artisan('documentator:check', ['--against' => $path, '--fail-on' => 'breaking'])
+        ->expectsOutputToContain('non-breaking drift')
+        ->assertExitCode(0);
+
+    $baseline = json_decode((string) file_get_contents($path), true, flags: JSON_THROW_ON_ERROR);
+    $baseline['paths']['/api/removed'] = $baseline['paths']['/api/checked'];
+    file_put_contents($path, json_encode($baseline));
+
+    $this->artisan('documentator:check', ['--against' => $path, '--fail-on' => 'breaking'])
+        ->expectsOutputToContain('path removed')
+        ->assertExitCode(1);
+
+    @unlink($path);
+});
+
 it('prints a documentation health summary', function () {
     Route::get('api/raw', [CheckedController::class, 'raw']);
 

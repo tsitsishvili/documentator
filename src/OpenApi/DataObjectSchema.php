@@ -25,6 +25,16 @@ final class DataObjectSchema
 
     private const COLLECTION_OF = 'Spatie\\LaravelData\\Attributes\\DataCollectionOf';
 
+    private const MAP_INPUT_NAME = 'Spatie\\LaravelData\\Attributes\\MapInputName';
+
+    private const MAP_OUTPUT_NAME = 'Spatie\\LaravelData\\Attributes\\MapOutputName';
+
+    private const NAME_MAPPER = 'Spatie\\LaravelData\\Mappers\\NameMapper';
+
+    private const OPTIONAL = 'Spatie\\LaravelData\\Optional';
+
+    private const LAZY = 'Spatie\\LaravelData\\Lazy';
+
     private const MAX_DEPTH = 4;
 
     /**
@@ -38,8 +48,9 @@ final class DataObjectSchema
 
         foreach ($this->reflectProperties($dataClass) as $property) {
             $schema = $this->propertySchema($property, 0);
-            $params[$property->getName()] = new ParameterData(
-                name: $property->getName(),
+            $name = $this->mappedName($property, self::MAP_INPUT_NAME);
+            $params[$name] = new ParameterData(
+                name: $name,
                 type: $schema['type'] ?? 'string',
                 required: ! $this->isOptional($property),
                 schema: $schema,
@@ -59,12 +70,28 @@ final class DataObjectSchema
         }
 
         $properties = [];
+        $required = [];
 
         foreach ($this->reflectProperties($dataClass) as $property) {
-            $properties[$property->getName()] = $this->propertySchema($property, $depth);
+            $name = $this->mappedName($property, self::MAP_OUTPUT_NAME);
+            $properties[$name] = $this->propertySchema($property, $depth);
+
+            if (! $this->isOptional($property)) {
+                $required[] = $name;
+            }
         }
 
-        return $properties === [] ? ['type' => 'object'] : ['type' => 'object', 'properties' => $properties];
+        if ($properties === []) {
+            return ['type' => 'object'];
+        }
+
+        $schema = ['type' => 'object', 'properties' => $properties];
+
+        if ($required !== []) {
+            $schema['required'] = $required;
+        }
+
+        return $schema;
     }
 
     /**
@@ -91,16 +118,24 @@ final class DataObjectSchema
     {
         $type = $property->getType();
 
+        $nullable = $type?->allowsNull() ?? false;
+
         if ($type instanceof ReflectionUnionType) {
-            $type = $this->firstNamedType($type);
+            $type = $this->firstDocumentedType($type);
         }
 
         $schema = $type instanceof ReflectionNamedType
             ? $this->typeSchema($type->getName(), $property, $depth)
             : ['type' => 'string'];
 
-        if ($type !== null && $type->allowsNull()) {
+        if ($nullable) {
             $schema['nullable'] = true;
+        }
+
+        $description = $this->propertyDescription($property);
+
+        if ($description !== null) {
+            $schema['description'] = $description;
         }
 
         return $schema;
@@ -169,10 +204,12 @@ final class DataObjectSchema
         return ['type' => $type, 'enum' => $cases];
     }
 
-    private function firstNamedType(ReflectionUnionType $union): ?ReflectionNamedType
+    private function firstDocumentedType(ReflectionUnionType $union): ?ReflectionNamedType
     {
         foreach ($union->getTypes() as $type) {
-            if ($type instanceof ReflectionNamedType && $type->getName() !== 'null') {
+            if ($type instanceof ReflectionNamedType
+                && ! in_array($type->getName(), ['null', self::OPTIONAL, self::LAZY], true)
+                && ! is_subclass_of($type->getName(), self::LAZY)) {
                 return $type;
             }
         }
@@ -192,6 +229,20 @@ final class DataObjectSchema
             return true;
         }
 
+        $types = $type instanceof ReflectionUnionType ? $type->getTypes() : ($type instanceof ReflectionNamedType ? [$type] : []);
+
+        foreach ($types as $candidate) {
+            if (! $candidate instanceof ReflectionNamedType) {
+                continue;
+            }
+
+            $name = $candidate->getName();
+
+            if ($name === self::OPTIONAL || $name === self::LAZY || is_subclass_of($name, self::LAZY)) {
+                return true;
+            }
+        }
+
         if ($property->hasDefaultValue()) {
             return true;
         }
@@ -207,5 +258,52 @@ final class DataObjectSchema
         }
 
         return false;
+    }
+
+    private function mappedName(ReflectionProperty $property, string $attributeClass): string
+    {
+        try {
+            $attributes = $property->getAttributes($attributeClass);
+
+            if ($attributes === []) {
+                $attributes = $property->getDeclaringClass()->getAttributes($attributeClass);
+            }
+
+            $attribute = $attributes[0] ?? null;
+            $arguments = $attribute?->getArguments() ?? [];
+            $mapper = $arguments[0] ?? $arguments['input'] ?? $arguments['output'] ?? null;
+
+            if (is_string($mapper) && class_exists($mapper) && is_subclass_of($mapper, self::NAME_MAPPER)) {
+                $mapper = (new $mapper)->map($property->getName());
+            }
+
+            return is_string($mapper) || is_int($mapper) ? (string) $mapper : $property->getName();
+        } catch (Throwable) {
+            return $property->getName();
+        }
+    }
+
+    private function propertyDescription(ReflectionProperty $property): ?string
+    {
+        $doc = $property->getDocComment();
+
+        if (! is_string($doc)) {
+            return null;
+        }
+
+        $lines = preg_split('/\R/', $doc) ?: [];
+        $description = [];
+
+        foreach ($lines as $line) {
+            $line = trim(preg_replace('/^\s*\/?\**\s?|\*\/$/', '', $line) ?? '');
+
+            if ($line === '' || str_starts_with($line, '@')) {
+                continue;
+            }
+
+            $description[] = $line;
+        }
+
+        return $description === [] ? null : implode("\n", $description);
     }
 }

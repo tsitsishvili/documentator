@@ -114,13 +114,15 @@ it('types resource fields from the model casts', function () {
         ->and($props['name']['type'])->toBe('string');
 });
 
-it('marks whenLoaded fields nullable and follows the nested resource', function () {
+it('marks whenLoaded fields optional and follows the nested resource', function () {
     Route::get('api/widgets/{widget}', [WidgetShowController::class, 'show']);
 
-    $tagList = widgetSchema('/api/widgets/{widget}')['properties']['tag_list'];
+    $schema = widgetSchema('/api/widgets/{widget}');
+    $tagList = $schema['properties']['tag_list'];
 
     expect($tagList)->not->toHaveKey('nullable')
-        ->and($tagList['type'])->toBe(['array', 'null'])
+        ->and($tagList['type'])->toBe('array')
+        ->and($schema['required'])->not->toContain('tag_list')
         ->and($tagList['items']['properties']['label']['type'])->toBe('string');
 });
 

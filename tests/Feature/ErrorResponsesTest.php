@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Route;
+use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 use Tsitsishvili\Documentator\Attributes\Response;
 use Tsitsishvili\Documentator\Documentator;
 
@@ -62,6 +64,27 @@ class ErrorThingController
 
     #[Response(422, description: 'Custom validation shape')]
     public function declared(StoreErrorThingRequest $request): void {}
+
+    public function controlled(bool $blocked)
+    {
+        Gate::authorize('view-errors');
+        abort_if($blocked, 409);
+
+        if (! $blocked) {
+            throw new NotFoundHttpException;
+        }
+
+        return response()->json(['ok' => true]);
+    }
+
+    public function variants(bool $detailed)
+    {
+        if ($detailed) {
+            return response()->json(['id' => 1, 'detail' => 'full']);
+        }
+
+        return response()->json(['id' => 1]);
+    }
 }
 
 function errorResponses(string $uri, string $verb = 'post'): array
@@ -142,4 +165,21 @@ it('emits nothing when error response inference is disabled', function () {
     expect(errorResponses('/api/guarded-things'))->toHaveKeys(['201'])
         ->and(errorResponses('/api/guarded-things'))->not->toHaveKeys(['401', '403', '422'])
         ->and(errorResponses('/api/error-things/{errorThing}', 'get'))->not->toHaveKey('404');
+});
+
+it('infers abort, Gate authorization, and thrown HTTP exception responses', function () {
+    Route::get('api/controlled-errors', [ErrorThingController::class, 'controlled']);
+
+    expect(errorResponses('/api/controlled-errors', 'get'))->toHaveKeys(['200', '403', '404', '409']);
+});
+
+it('combines multiple same-status return schemas with oneOf', function () {
+    Route::get('api/error-variants', [ErrorThingController::class, 'variants']);
+
+    $schema = errorResponses('/api/error-variants', 'get')['200']['content']['application/json']['schema'];
+
+    expect($schema['oneOf'])->toHaveCount(2)
+        ->and($schema['oneOf'][0]['properties'])->toHaveKeys(['id', 'detail'])
+        ->and($schema['oneOf'][1]['properties'])->toHaveKey('id')
+        ->and($schema['oneOf'][1]['properties'])->not->toHaveKey('detail');
 });

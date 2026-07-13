@@ -73,6 +73,15 @@ final class EndpointData
     public bool $deprecated = false;
 
     /**
+     * Ordered, internal trace of which extraction strategy produced or
+     * overrode each documented facet. This is intentionally not emitted into
+     * the OpenAPI document; it powers the documentator:explain command.
+     *
+     * @var array<int, array{field: string, strategy: string, effect: string}>
+     */
+    public array $provenance = [];
+
+    /**
      * The non-HEAD/OPTIONS HTTP verbs OpenAPI should emit operations for.
      *
      * @return array<int, string>

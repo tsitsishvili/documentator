@@ -50,10 +50,11 @@ pipeline enriches the endpoint:
 | Controller/closure PHPDoc | **summary** (first line) and **description** (the rest), so written docblocks become docs |
 | FormRequest `rules()` | parameters with types, required, **enums** (`in:`, `Rule::enum`, `Rule::in`), **formats** (email/uuid/date), bounds (`min`/`max`), `regex`→`pattern`, `digits`→integer, `confirmed`→a `_confirmation` field, nullability, **nested** rules (`items.*.id`), **file uploads** → multipart. On GET/HEAD routes these become **query parameters** instead of a body |
 | Inline validation / request access | the same rule parsing for literal `$request->validate([...])`, `request()->validate([...])`, `Validator::make(..., [...])` arrays, plus request accessors like `$request->integer('page')`, `$request->boolean('active')`, `$request->query('q')`, and `request('q')`. Validation rules understand escaped dots, `exists`, inline `Rule::exists`, and `Rule::when`. Local PHPDoc tags can refine inline params: `@var`, `@example`, `@default`, `@query`, `@body`, `@ignoreParam` |
-| spatie/laravel-data | request/response **Data objects** — typed properties, enums, nested Data, collections (optional, auto-detected) |
+| spatie/laravel-data | request/response **Data objects** — typed properties, enums, nested Data, collections, mapped input/output names, and `Optional`/`Lazy` requiredness (optional, auto-detected) |
 | spatie/laravel-query-builder | query params from literal `allowedFilters`, `allowedSorts`, `defaultSort`, `allowedIncludes` and `allowedFields` calls, including simple helper methods, ignored filter values, and custom `*QueryBuilder` subclasses (optional, auto-detected from source; no runtime dependency) |
 | Laravel Actions | `rules()` on action classes and `handle()` return types for routes pointing at `asController()` (optional, auto-detected; no runtime dependency on the package) |
-| Route action return type / return statement | a success response schema from a Resource's `toArray()`, Laravel 13 `JsonApiResource` (`application/vnd.api+json`, `include`, `fields[type]`), a `ResourceCollection`, a `Resource::collection($q->paginate())` **return statement** (**paginator envelope** + `page`/`per_page` query params), `jsonPaginate()` (`page[number]` / `page[size]`), literal `response()->json([...], 202)` payloads, common Laravel response helpers (`response()`, `view()`, redirects), service methods that return arrays, or an **Eloquent model** (`$casts` + `@property`). Status follows the verb: POST → **201**, DELETE → **204** |
+| Route action return type / return statement | success schemas from all readable return branches: Resource `toArray()` fields (including required vs conditional fields and `array_merge(parent::toArray(), …)`), Laravel 13 `JsonApiResource`, collections/paginators, literal JSON payloads, common response helpers, array-returning services, Data objects, or Eloquent models. Distinct shapes sharing a status become `oneOf`. Status follows the verb: POST → **201**, DELETE → **204** |
+| Control flow | possible errors from literal `abort*` calls, controller/Gate authorization, validation, model binding, and recognized Laravel/Symfony HTTP exceptions |
 | Generated examples | a representative `example` for every body/parameter — format- and name-aware (`email`→`user@example.com`, `*_url`, `*_name`, dates, enums, …) so the playground starts filled |
 | PHP attributes | overrides for everything above (runs last) |
 
@@ -305,6 +306,8 @@ php artisan documentator:check --strict                # fail the build if any i
 php artisan documentator:check --json                  # machine-readable CI/dashboard payload
 php artisan documentator:check --suggest-hidden        # suggest internal/debug routes to hide
 php artisan documentator:check --against=openapi.json  # fail if the spec has drifted; re-export and commit
+php artisan documentator:check --against=openapi.json --fail-on=breaking # allow additive drift
+php artisan documentator:explain GET /api/orders       # show where every inferred fact came from
 ```
 
 ## Configuration

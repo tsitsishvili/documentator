@@ -10,15 +10,15 @@ inference can't see — attributes always win.
 
 To make an endpoint document well (no annotations needed):
 
-- Use a `[Controller::class, 'method']` route, **not a closure** — closure routes
-  skip reflection-based inference.
+- Prefer a `[Controller::class, 'method']` route for controller/class metadata;
+  typed closures still support parameter, attribute, and return-expression inference.
 - Add a docblock: **first line = summary**, the rest = description.
 - Type-hint a `FormRequest` (its `rules()` become body params; on **GET/HEAD** they
   become **query** params) — or inline `$request->validate([...])`.
 - Give the method a **return type**: an API `Resource`, `ResourceCollection`,
   Eloquent model, or `spatie/laravel-data` object → response schema is inferred.
-- Status follows the verb (`POST → 201`, `DELETE → 204`); 401/403/404/422 are added
-  from the endpoint's shape.
+- Status follows the verb (`POST → 201`, `DELETE → 204`); errors are added
+  from auth, validation, model binding, `abort*`, authorization, and HTTP exceptions.
 
 Override only the gaps with attributes from `Tsitsishvili\Documentator\Attributes`:
 
@@ -46,8 +46,9 @@ Operational notes:
 - Verify with `php artisan documentator:check` (audits quality, validates the
   OpenAPI shape) — run it in CI. Use
   `php artisan documentator:check --against=openapi.json` to catch committed-spec
-  drift. Also: `documentator:generate` (cache), `documentator:export`,
-  `documentator:postman`.
+  drift, or add `--fail-on=breaking` to allow additive drift. Use
+  `documentator:explain METHOD URI` to trace inference. Also:
+  `documentator:generate` (cache), `documentator:export`, `documentator:postman`.
 
 For the full how-to (rich validation-rule mapping, pagination, sections, the
 complete attribute reference), see the `documentator-api-docs` skill at
