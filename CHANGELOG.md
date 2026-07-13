@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.8.0] - 2026-07-13
+
 ### Added
 
 - **PHP 8.5 support.** The test matrix now runs on PHP 8.5 alongside 8.2–8.4.
@@ -402,7 +404,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (with a Scalar driver), Postman export, and the `documentator:generate`,
   `documentator:export` and `documentator:postman` commands.
 
-[Unreleased]: https://github.com/tsitsishvili/documentator/compare/v1.7.1...HEAD
+[Unreleased]: https://github.com/tsitsishvili/documentator/compare/v1.8.0...HEAD
+[1.8.0]: https://github.com/tsitsishvili/documentator/compare/v1.7.1...v1.8.0
 [1.7.1]: https://github.com/tsitsishvili/documentator/compare/v1.7.0...v1.7.1
 [1.7.0]: https://github.com/tsitsishvili/documentator/compare/v1.6.3...v1.7.0
 [1.6.3]: https://github.com/tsitsishvili/documentator/compare/v1.6.2...v1.6.3
