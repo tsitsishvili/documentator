@@ -4,14 +4,14 @@
  */
 
 :root {
-    /* Layered dark surfaces */
-    --bg: #0b0d12;
-    --bg-2: #10131a;
-    --surface: #161a22;
-    --surface-2: #1b202a;
-    --surface-3: #252b37;
-    --border: rgba(230, 236, 247, .08);
-    --border-strong: rgba(230, 236, 247, .15);
+    /* Layered soft-dark surfaces */
+    --bg: #11141b;
+    --bg-2: #171b24;
+    --surface: #1d222d;
+    --surface-2: #232a36;
+    --surface-3: #2d3543;
+    --border: rgba(230, 236, 247, .09);
+    --border-strong: rgba(230, 236, 247, .17);
 
     /* Text */
     --text: #e7ebf3;
@@ -38,9 +38,9 @@
     --m: var(--muted);
 
     /* Depth */
-    --shadow-sm: 0 1px 2px rgba(0, 0, 0, .45);
-    --shadow: 0 10px 28px -16px rgba(0, 0, 0, .72), 0 1px 5px rgba(0, 0, 0, .35);
-    --shadow-lg: 0 28px 70px -22px rgba(0, 0, 0, .8);
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, .36);
+    --shadow: 0 10px 28px -16px rgba(0, 0, 0, .62), 0 1px 5px rgba(0, 0, 0, .28);
+    --shadow-lg: 0 28px 70px -22px rgba(0, 0, 0, .7);
     --lift: inset 0 1px 0 rgba(255, 255, 255, .05);
     --ring: 0 0 0 3px var(--blue-soft);
 
@@ -1005,13 +1005,13 @@ body.is-resizing-console {
     overflow-wrap: anywhere;
     overflow: auto;
     max-height: clamp(300px, 48vh, 620px);
-    background: #0d1016;
+    background: #141821;
 }
 .response__tree {
     max-height: clamp(300px, 48vh, 620px);
     overflow: auto;
     padding: 12px 10px 16px;
-    background: #0d1016;
+    background: #141821;
     font-family: var(--mono);
     font-size: 12px;
     line-height: 1.65;
@@ -1078,7 +1078,7 @@ body.is-resizing-console {
 }
 
 /* Response headers as a key/value table */
-.response__headers { padding: 8px 14px 14px; max-height: 260px; overflow: auto; background: #0d1016; }
+.response__headers { padding: 8px 14px 14px; max-height: 260px; overflow: auto; background: #141821; }
 .hrow { display: grid; grid-template-columns: minmax(120px, 38%) 1fr; gap: 6px 14px; padding: 6px 0; border-bottom: 1px solid var(--border); }
 .hrow:last-child { border-bottom: 0; }
 .hrow__key { font-family: var(--mono); font-size: 11.5px; color: var(--blue); word-break: break-all; }
