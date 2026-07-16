@@ -4,8 +4,10 @@ declare(strict_types=1);
 
 namespace Tsitsishvili\Documentator\Support;
 
+use Tsitsishvili\Documentator\OpenApi\OpenApiMethods;
+
 /**
- * Lightweight OpenAPI 3.1 sanity checks for the document this package emits.
+ * Lightweight OpenAPI 3.2 sanity checks for the document this package emits.
  * This is intentionally narrower than a full spec validator: it catches broken
  * refs and malformed path/operation/schema shapes before CI exports a bad file.
  */
@@ -20,8 +22,8 @@ final class OpenApiValidator
         $errors = [];
         $operationIds = [];
 
-        if (($spec['openapi'] ?? null) !== '3.1.0') {
-            $errors[] = 'openapi must be 3.1.0';
+        if (($spec['openapi'] ?? null) !== '3.2.0') {
+            $errors[] = 'openapi must be 3.2.0';
         }
 
         if (! is_array($spec['info'] ?? null)) {
@@ -60,11 +62,10 @@ final class OpenApiValidator
     private static function validatePathItem(array $spec, string $path, array $pathItem, array &$operationIds): array
     {
         $errors = [];
-        $verbs = ['get', 'post', 'put', 'patch', 'delete', 'options', 'head'];
         $templateParameters = self::pathTemplateParameters($path);
 
         foreach ($pathItem as $verb => $operation) {
-            if (! in_array($verb, $verbs, true)) {
+            if (! in_array($verb, OpenApiMethods::ALL, true)) {
                 continue;
             }
 

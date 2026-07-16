@@ -4,18 +4,17 @@ declare(strict_types=1);
 
 namespace Tsitsishvili\Documentator\Postman;
 
+use Tsitsishvili\Documentator\OpenApi\OpenApiMethods;
 use Tsitsishvili\Documentator\OpenApi\SchemaSampler;
 
 /**
- * Converts a generated OpenAPI 3.1 document into a Postman Collection v2.1, so
+ * Converts a generated OpenAPI 3.2 document into a Postman Collection v2.1, so
  * consumers can import the API straight into Postman/Insomnia. Endpoints are
  * grouped into folders by tag; `{{baseUrl}}` and `{{token}}` are collection
  * variables.
  */
 final class PostmanGenerator
 {
-    private const VERBS = ['get', 'post', 'put', 'patch', 'delete', 'head', 'options'];
-
     /**
      * @param  array<string, mixed>  $openapi
      * @return array<string, mixed>
@@ -33,7 +32,7 @@ final class PostmanGenerator
         $folders = [];
         foreach ($openapi['paths'] ?? [] as $path => $operations) {
             foreach ($operations as $verb => $operation) {
-                if (! in_array($verb, self::VERBS, true)) {
+                if (! in_array($verb, OpenApiMethods::ALL, true)) {
                     continue;
                 }
                 $tag = $operation['tags'][0] ?? 'Endpoints';

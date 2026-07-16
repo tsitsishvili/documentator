@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.0] - 2026-07-16
+
+### Added
+
+- **HTTP QUERY support.** Laravel `QUERY` routes are emitted as first-class
+  OpenAPI operations with request bodies, and are supported by validation,
+  contract diffs, section filtering, Postman exports, the built-in explorer,
+  try-it requests, and generated code snippets.
+
+### Changed
+
+- **OpenAPI 3.2 output.** Generated documents now declare OpenAPI 3.2, the first
+  OpenAPI release with a standard `query` Path Item field. Consumers pinned to
+  OpenAPI 3.1-only tooling must update before consuming newly generated specs.
+- **Stronger, tool-specific AI guidance.** The portable, Codex, Gemini, Cursor,
+  Boost, and Agent Skills instructions now share tested core behavior while
+  providing workflows suited to each tool. The on-demand skill adds method-aware
+  request placement, `QUERY` examples, diagnosis, provenance, contract checks,
+  and corrected descriptions of `documentator:check` and unreadable routes.
+
 ## [1.8.0] - 2026-07-13
 
 ### Added
@@ -404,7 +424,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (with a Scalar driver), Postman export, and the `documentator:generate`,
   `documentator:export` and `documentator:postman` commands.
 
-[Unreleased]: https://github.com/tsitsishvili/documentator/compare/v1.8.0...HEAD
+[Unreleased]: https://github.com/tsitsishvili/documentator/compare/v2.0.0...HEAD
+[2.0.0]: https://github.com/tsitsishvili/documentator/compare/v1.8.0...v2.0.0
 [1.8.0]: https://github.com/tsitsishvili/documentator/compare/v1.7.1...v1.8.0
 [1.7.1]: https://github.com/tsitsishvili/documentator/compare/v1.7.0...v1.7.1
 [1.7.0]: https://github.com/tsitsishvili/documentator/compare/v1.6.3...v1.7.0

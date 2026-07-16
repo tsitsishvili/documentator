@@ -5,7 +5,7 @@ Interactive API documentation for Laravel that mostly writes itself.
 Documentator scans your application's routes, FormRequests, API Resources and
 controller return types to infer documentation automatically, lets you refine
 anything with PHP attributes, and serves an interactive UI — backed by a standard
-**OpenAPI 3.1** document — so third parties can browse your endpoints, read
+**OpenAPI 3.2** document — so third parties can browse your endpoints, read
 descriptions, and try requests live.
 
 - **Zero-config by default** — point it at `api/*` and you get useful docs.
@@ -15,9 +15,9 @@ descriptions, and try requests live.
 - **Built-in explorer** — a dark "Aurora" UI with no external assets, route
   sections, filters, a request playground, auth, snippets and a readable
   response viewer. Or switch to [Scalar](https://scalar.com).
-- **Standard output** — a plain OpenAPI 3.1 document other tools can consume,
+- **Standard output** — a plain OpenAPI 3.2 document other tools can consume,
   with response schemas shared by multiple operations hoisted into
-  `components/schemas`.
+  `components/schemas`, including body-bearing HTTP `QUERY` operations.
 
 Requires PHP 8.2+ and Laravel 12 or 13.
 
@@ -34,6 +34,12 @@ Publish the config (optional):
 ```bash
 php artisan vendor:publish --tag=documentator-config
 ```
+
+### Upgrading
+
+Upgrading from 1.x requires OpenAPI 3.2 support across the downstream toolchain.
+Follow the [1.x → 2.0 upgrade guide](UPGRADING.md#upgrading-from-1x-to-20) before
+changing the Composer constraint or regenerating committed artifacts.
 
 Visit `/docs` to see the interactive UI. The raw spec is at `/docs/openapi.json`.
 When `grouping.sections` is configured, each section gets its own UI and split
@@ -70,6 +76,21 @@ public function store(StoreOrderRequest $request): OrderResource
     // Inferred with no attributes: path param {order}, body params from
     // StoreOrderRequest::rules(), a 201 response from OrderResource.
     return new OrderResource(Order::create($request->validated()));
+}
+```
+
+### HTTP `QUERY`
+
+Register `QUERY` with Laravel's custom-method route support. Documentator emits
+the operation under OpenAPI 3.2's standard `query` Path Item field, and treats
+the `FormRequest` rules as request content rather than URI query parameters:
+
+```php
+Route::match(['QUERY'], '/orders/search', [OrderSearchController::class, 'search']);
+
+public function search(SearchOrdersRequest $request): OrderCollection
+{
+    return new OrderCollection(Order::search($request->validated()));
 }
 ```
 
@@ -360,7 +381,7 @@ refreshes on every dependency update:
 }
 ```
 
-**Without Boost**, publish the same guidance into the native locations for
+**Without Boost**, publish tool-specific guidance into the native locations for
 Claude Code, Cursor, Gemini CLI, Codex, and other agents:
 
 ```bash
@@ -369,11 +390,17 @@ php artisan vendor:publish --tag=documentator-ai
 
 This writes:
 
-- `.claude/skills/documentator-api-docs/SKILL.md` — the full Claude Code / Agent Skills skill.
-- `.cursor/rules/documentator.mdc` — a Cursor rule that auto-attaches on API code.
-- `GEMINI.md` — always-on guidance auto-loaded by Gemini CLI.
-- `AGENTS.md` — always-on guidance auto-loaded by Codex and other `AGENTS.md` agents.
-- `.ai/guidelines/documentator.md` — the same short guideline for any other agent.
+- `.claude/skills/documentator-api-docs/SKILL.md` — the complete inspect,
+  implement, diagnose, and verify workflow for Claude Code / Agent Skills.
+- `.cursor/rules/documentator.mdc` — a concise Cursor rule scoped to API code.
+- `GEMINI.md` — a context-gathering workflow for Gemini CLI.
+- `AGENTS.md` — an implementation and verification workflow for Codex and other
+  `AGENTS.md` agents.
+- `.ai/guidelines/documentator.md` — portable guidance for any other agent.
+
+All variants preserve the same critical behavior: inference before attributes,
+method-aware input placement (including body-bearing HTTP `QUERY`), provenance
+with `documentator:explain`, and accurate `documentator:check` expectations.
 
 `vendor:publish` never overwrites an existing file, so a `GEMINI.md` or
 `AGENTS.md` you already maintain is left untouched (pass `--force` to replace it,

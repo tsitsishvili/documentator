@@ -73,7 +73,7 @@ it('detects drift from a committed spec', function () {
     $this->artisan('documentator:check', ['--against' => $path])->assertExitCode(0);
 
     // Mutate the committed spec → drift is detected.
-    file_put_contents($path, json_encode(['openapi' => '3.1.0', 'paths' => []]));
+    file_put_contents($path, json_encode(['openapi' => '3.2.0', 'paths' => []]));
     $this->artisan('documentator:check', ['--against' => $path])
         ->expectsOutputToContain('drifted')
         ->assertExitCode(1);

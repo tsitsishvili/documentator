@@ -31,6 +31,7 @@
     /* HTTP method palette */
     --get: #2fd4a3;
     --post: #4d8dff;
+    --query: #a77bf3;
     --put: var(--amber);
     --patch: var(--violet);
     --delete: #f4527a;
@@ -434,6 +435,7 @@ a { color: inherit; }
 }
 .m-get { --m: var(--get); }
 .m-post { --m: var(--post); }
+.m-query { --m: var(--query); }
 .m-put { --m: var(--put); }
 .m-patch { --m: var(--patch); }
 .m-delete { --m: var(--delete); }

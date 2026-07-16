@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Tsitsishvili\Documentator\Support;
 
+use Tsitsishvili\Documentator\OpenApi\OpenApiMethods;
+
 /**
  * Small, human-oriented OpenAPI diff for CI output. It is not a full semantic
  * compatibility checker, but it highlights the contract changes people need to
@@ -53,9 +55,8 @@ final class OpenApiDiff
     private static function comparePath(string $path, array $expected, array $actual): array
     {
         $changes = [];
-        $verbs = ['get', 'post', 'put', 'patch', 'delete', 'options', 'head'];
-        $expectedOps = array_intersect(array_keys($expected), $verbs);
-        $actualOps = array_intersect(array_keys($actual), $verbs);
+        $expectedOps = array_intersect(array_keys($expected), OpenApiMethods::ALL);
+        $actualOps = array_intersect(array_keys($actual), OpenApiMethods::ALL);
 
         foreach (array_diff($expectedOps, $actualOps) as $verb) {
             $changes[] = self::change('breaking', strtoupper($verb).' '.$path, 'operation removed');

@@ -11,7 +11,7 @@ use Tsitsishvili\Documentator\Data\ResponseData;
 use Tsitsishvili\Documentator\Extraction\Support\RuleParser;
 
 /**
- * Renders a list of EndpointData into an OpenAPI 3.1 document (a plain array
+ * Renders a list of EndpointData into an OpenAPI 3.2 document (a plain array
  * ready to be JSON-encoded and handed to Scalar).
  */
 final class OpenApiGenerator
@@ -67,7 +67,7 @@ final class OpenApiGenerator
         }
 
         $spec = array_filter([
-            'openapi' => '3.1.0',
+            'openapi' => '3.2.0',
             'info' => $this->info(),
             'servers' => config('documentator.servers', []),
             'security' => $globalScheme !== null ? [[$globalScheme => []]] : [],
@@ -486,7 +486,7 @@ final class OpenApiGenerator
     }
 
     /**
-     * OpenAPI 3.1 is JSON Schema-based, so `type: ["string", "null"]` is the
+     * OpenAPI 3.1+ is JSON Schema-based, so `type: ["string", "null"]` is the
      * native nullable representation. Extractors keep the simpler internal
      * `nullable` flag; the public document is normalized here.
      *

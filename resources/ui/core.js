@@ -8,8 +8,8 @@ export function start(deps) {
 
     var createSnippetController = deps.createSnippetController;
 
-    var METHODS = ['get', 'post', 'put', 'patch', 'delete', 'head', 'options'];
-    var BODY_METHODS = { post: 1, put: 1, patch: 1, delete: 1 };
+    var METHODS = ['get', 'post', 'put', 'patch', 'delete', 'query', 'head', 'options'];
+    var BODY_METHODS = { post: 1, put: 1, patch: 1, delete: 1, query: 1 };
     var CONSOLE_MIN = 340;
     var CONSOLE_MAX = 760;
     var NAV_HEIGHTS = { section: 34, group: 39, item: 74 };
@@ -89,7 +89,7 @@ export function start(deps) {
         return String(Math.floor(code / 100));
     }
 
-    /* The non-null members of an OpenAPI 3.1 type (which may be a union array). */
+    /* The non-null members of an OpenAPI 3.1+ type (which may be a union array). */
     function typesOf(schema) {
         schema = resolveSchema(schema);
         if (!schema) return [];

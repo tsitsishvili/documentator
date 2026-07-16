@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use Illuminate\Support\Facades\Route;
 use Illuminate\Support\ServiceProvider;
+use Tsitsishvili\Documentator\Documentator;
 use Tsitsishvili\Documentator\DocumentatorServiceProvider;
 use Tsitsishvili\Documentator\OpenApi\OpenApiSections;
 
@@ -17,7 +18,7 @@ it('exports the OpenAPI document to a file', function () {
     expect(is_file($path))->toBeTrue();
 
     $spec = json_decode((string) file_get_contents($path), true);
-    expect($spec['openapi'])->toBe('3.1.0')
+    expect($spec['openapi'])->toBe('3.2.0')
         ->and($spec['paths'])->toHaveKey('/api/ping');
 
     @unlink($path);
@@ -61,6 +62,18 @@ it('generates split cached OpenAPI documents for configured sections', function 
     @rmdir(dirname($path));
 });
 
+it('keeps QUERY operations in split OpenAPI documents', function () {
+    config([
+        'documentator.grouping.sections' => ['api' => 'API'],
+    ]);
+
+    Route::match(['QUERY'], 'api/search', fn () => []);
+
+    $sections = app(OpenApiSections::class)->split(app(Documentator::class)->toOpenApi());
+
+    expect($sections['api']['paths']['/api/search'])->toHaveKey('query');
+});
+
 it('ships AI agent guidance files with the package', function () {
     $root = dirname(__DIR__, 2);
 
@@ -69,7 +82,14 @@ it('ships AI agent guidance files with the package', function () {
         ->and(is_file($root.'/resources/ai/guidelines/documentator.md'))->toBeTrue()
         ->and(is_file($root.'/resources/ai/cursor/documentator.mdc'))->toBeTrue()
         ->and(is_file($root.'/resources/ai/gemini/documentator.md'))->toBeTrue()
-        ->and(is_file($root.'/resources/ai/codex/documentator.md'))->toBeTrue();
+        ->and(is_file($root.'/resources/ai/codex/documentator.md'))->toBeTrue()
+        ->and(is_file($root.'/UPGRADING.md'))->toBeTrue();
+
+    expect((string) file_get_contents($root.'/UPGRADING.md'))
+        ->toContain('## Upgrading from 1.x to 2.0')
+        ->toContain('OpenAPI 3.2')
+        ->toContain('documentator:check --against=openapi-v1.json')
+        ->toContain("Route::match(['QUERY']");
 
     $skill = (string) file_get_contents($root.'/resources/boost/skills/documentator-api-docs/SKILL.md');
     expect($skill)->toStartWith('---')
@@ -98,10 +118,47 @@ it('ships AI agent guidance files with the package', function () {
     foreach ($shortGuidanceFiles as $path) {
         $guidance = (string) file_get_contents($path);
 
-        foreach ($attributeNames as $attributeName) {
-            expect($guidance)->toContain($attributeName);
+        foreach ([
+            'OpenAPI 3.2',
+            "Route::match(['QUERY']",
+            '`GET`',
+            '`HEAD`',
+            'documentator:explain',
+            'documentator:check',
+        ] as $coreInstruction) {
+            expect($guidance)->toContain($coreInstruction);
         }
     }
+
+    expect((string) file_get_contents($root.'/resources/ai/guidelines/documentator.md'))
+        ->toContain('## Portable workflow')
+        ->not->toContain('Generation never throws')
+        ->and((string) file_get_contents($root.'/resources/ai/codex/documentator.md'))
+        ->toContain('## Codex workflow')
+        ->and((string) file_get_contents($root.'/resources/ai/gemini/documentator.md'))
+        ->toContain('## Gemini context-gathering sequence')
+        ->and((string) file_get_contents($root.'/resources/ai/cursor/documentator.mdc'))
+        ->toContain('globs: app/**/*.php,routes/**/*.php,config/documentator.php')
+        ->and((string) file_get_contents($root.'/resources/boost/guidelines/core.blade.php'))
+        ->toContain('Use the **`documentator-api-docs`** skill')
+        ->and($skill)
+        ->not->toContain('## When to use this skill');
+});
+
+it('excludes development-only files from release archives', function () {
+    $root = dirname(__DIR__, 2);
+    $attributes = (string) file_get_contents($root.'/.gitattributes');
+
+    expect($attributes)
+        ->toContain('/vendor export-ignore')
+        ->toContain('/node_modules export-ignore')
+        ->toContain('/tests export-ignore')
+        ->toContain('/test-results export-ignore')
+        ->toContain('/.idea export-ignore')
+        ->toContain('/.phpstan export-ignore')
+        ->not->toContain('/resources export-ignore')
+        ->not->toContain('/src export-ignore')
+        ->not->toContain('/UPGRADING.md export-ignore');
 });
 
 it('publishes AI guidance to native agent locations under the documentator-ai tag', function () {

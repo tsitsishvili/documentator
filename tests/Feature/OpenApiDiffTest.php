@@ -103,3 +103,24 @@ it('classifies referenced constraints, nullability, headers, and scopes', functi
         'pattern constraint added',
     );
 });
+
+it('compares QUERY operations', function () {
+    $expected = [
+        'paths' => [
+            '/api/search' => [
+                'query' => [
+                    'responses' => ['200' => ['description' => 'ok']],
+                ],
+            ],
+        ],
+    ];
+
+    $actual = $expected;
+    unset($actual['paths']['/api/search']['query']);
+
+    expect(OpenApiDiff::compare($expected, $actual))->toContain([
+        'severity' => 'breaking',
+        'location' => 'QUERY /api/search',
+        'message' => 'operation removed',
+    ]);
+});

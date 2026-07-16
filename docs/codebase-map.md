@@ -8,7 +8,7 @@ For the built-in browser UI only, see `docs/built-in-ui-code-map.md`.
 ## Big Picture
 
 Documentator is a Laravel package that scans host-app routes, enriches each
-route with inferred API documentation, turns the result into OpenAPI 3.1, and
+route with inferred API documentation, turns the result into OpenAPI 3.2, and
 serves or exports that document.
 
 Runtime flow:
@@ -20,7 +20,7 @@ Runtime flow:
    extraction strategies.
 4. The strategies fill `EndpointData`, `ParameterData`, and `ResponseData`.
 5. `src/OpenApi/OpenApiGenerator.php` converts endpoint data into an OpenAPI
-   3.1 array.
+   3.2 array.
 6. HTTP controllers, Artisan commands, and the Postman generator consume the
    OpenAPI array.
 
@@ -104,7 +104,7 @@ resource schemas are built.
 
 | File                                      | What Happens There                                                                                                                                                                     |
 |-------------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `src/OpenApi/OpenApiGenerator.php`        | Turns endpoint data into OpenAPI 3.1. Look here for parameter rendering, request bodies, response content, security, tags, sections, components, examples, and extension transformers. |
+| `src/OpenApi/OpenApiGenerator.php`        | Turns endpoint data into OpenAPI 3.2. Look here for parameter rendering, request bodies, response content, security, tags, sections, components, examples, and extension transformers. |
 | `src/OpenApi/OpenApiSections.php`         | Builds configured documentation sections and filters a full spec into per-section specs.                                                                                               |
 | `src/OpenApi/ResourceSchemaExtractor.php` | Parses Laravel API Resource `toArray()` methods and Eloquent model docblocks/casts into response schemas. Handles JSON:API resources too.                                              |
 | `src/OpenApi/DataObjectSchema.php`        | Builds request/response schemas for `spatie/laravel-data` objects.                                                                                                                     |

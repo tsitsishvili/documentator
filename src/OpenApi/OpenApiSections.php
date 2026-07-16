@@ -12,8 +12,6 @@ use Illuminate\Support\Str;
  */
 final class OpenApiSections
 {
-    private const METHODS = ['get', 'post', 'put', 'patch', 'delete', 'head', 'options', 'trace'];
-
     /**
      * @return array<int, array{slug: string, label: string, pattern: string}>
      */
@@ -132,7 +130,7 @@ final class OpenApiSections
             $operations = [];
 
             foreach ($pathItem as $method => $operation) {
-                if (! in_array(strtolower((string) $method), self::METHODS, true)) {
+                if (! in_array(strtolower((string) $method), OpenApiMethods::ALL, true)) {
                     $baseItems[$method] = $operation;
 
                     continue;
