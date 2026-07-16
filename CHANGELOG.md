@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.2] - 2026-07-16
+
+### Fixed
+
+- **Release history validation.** Restored the missing 2.0.1 changelog entry so
+  release tags and the documented package history remain aligned.
+
+## [2.0.1] - 2026-07-16
+
+### Changed
+
+- **Softer explorer theme.** Refined the built-in explorer's dark surfaces,
+  borders, shadows, and response panels for a lighter visual treatment.
+- **Consistent text files.** Enabled automatic text detection and LF line-ending
+  normalization through `.gitattributes`.
+
 ## [2.0.0] - 2026-07-16
 
 ### Added
