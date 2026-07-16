@@ -41,7 +41,7 @@ function spec(count = 650) {
   }
 
   return {
-    openapi: '3.1.0',
+    openapi: '3.2.0',
     info: { title: 'Visual API', version: '1.0.0' },
     servers: [{ url: 'https://api.example.test' }],
     paths,
@@ -50,7 +50,7 @@ function spec(count = 650) {
 
 function multipartSpec() {
   return {
-    openapi: '3.1.0',
+    openapi: '3.2.0',
     info: { title: 'Upload API', version: '1.0.0' },
     servers: [{ url: 'http://documentator.test' }],
     paths: {
@@ -90,7 +90,7 @@ function multipartSpec() {
 
 function cookieSpec() {
   return {
-    openapi: '3.1.0',
+    openapi: '3.2.0',
     info: { title: 'Cookie API', version: '1.0.0' },
     servers: [{ url: 'http://documentator.test' }],
     paths: {
@@ -111,7 +111,7 @@ function cookieSpec() {
 
 function hostileResponseSpec() {
   return {
-    openapi: '3.1.0',
+    openapi: '3.2.0',
     info: { title: 'Unsafe API', version: '1.0.0' },
     servers: [{ url: 'http://documentator.test' }],
     paths: {
@@ -120,6 +120,36 @@ function hostileResponseSpec() {
           operationId: 'unsafeResponse',
           tags: ['Security'],
           summary: 'Unsafe response',
+          responses: { 200: { description: 'OK' } },
+        },
+      },
+    },
+  };
+}
+
+function querySpec() {
+  return {
+    openapi: '3.2.0',
+    info: { title: 'Query API', version: '1.0.0' },
+    servers: [{ url: 'http://documentator.test' }],
+    paths: {
+      '/api/search': {
+        query: {
+          operationId: 'searchItems',
+          tags: ['Search'],
+          summary: 'Search items',
+          requestBody: {
+            required: true,
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  required: ['term'],
+                  properties: { term: { type: 'string' } },
+                },
+              },
+            },
+          },
           responses: { 200: { description: 'OK' } },
         },
       },
@@ -262,6 +292,36 @@ test('cookie parameters are applied through browser cookies on same-origin reque
   await page.locator('#send').click();
 
   await expect.poll(() => cookieHeader).toContain('session_id=abc123');
+});
+
+test('QUERY operations render, generate valid snippets, and send request content', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 860 });
+  let request = null;
+
+  await page.route('http://documentator.test/api/search', route => {
+    request = route.request();
+    return route.fulfill({ contentType: 'application/json', body: '{"items":[]}' });
+  });
+
+  await mount(page, querySpec());
+  await page.locator('.nav-item').first().click();
+
+  await expect(page.locator('.request-line .method')).toHaveText('query');
+  await expect(page.locator('#snippetCode')).toContainText('curl -X QUERY');
+  await page.locator('[data-lang="php"]').click();
+  await expect(page.locator('#snippetCode')).toContainText("send('QUERY'");
+  await page.locator('#snippetOther').selectOption('python');
+  await expect(page.locator('#snippetCode')).toContainText('requests.request("QUERY",');
+  await page.locator('#snippetOther').selectOption('ruby');
+  await expect(page.locator('#snippetCode')).toContainText('Net::HTTPGenericRequest.new("QUERY"');
+  await page.locator('#snippetOther').selectOption('csharp');
+  await expect(page.locator('#snippetCode')).toContainText('new HttpMethod("QUERY")');
+
+  await page.locator('[data-kind="body-field"][data-name="term"]').fill('laravel');
+  await page.locator('#send').click();
+
+  await expect.poll(() => request?.method()).toBe('QUERY');
+  expect(request.postDataJSON()).toEqual({ term: 'laravel' });
 });
 
 test('live response rendering keeps arbitrary API content inert', async ({ page }) => {

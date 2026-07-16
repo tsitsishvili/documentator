@@ -73,6 +73,8 @@ it('ships persistent filters and virtualized sidebar assets', function () {
         ->toContain("store.set('method'")
         ->toContain('renderVirtualNav')
         ->toContain('NAV_OVERSCAN')
+        ->toContain("'query'")
+        ->toContain('query: 1')
         ->not->toContain('All sections')
         ->and($css)
         ->toContain('.nav__spacer')

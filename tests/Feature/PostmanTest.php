@@ -134,3 +134,33 @@ it('exports multipart request bodies as Postman form data', function () {
         ->and($form['avatar']['type'])->toBe('file')
         ->and($form['name']['value'])->toBe('Ada');
 });
+
+it('exports QUERY operations with their request body', function () {
+    $openapi = [
+        'info' => ['title' => 'Acme'],
+        'paths' => [
+            '/api/search' => [
+                'query' => [
+                    'tags' => ['Search'],
+                    'requestBody' => [
+                        'content' => [
+                            'application/json' => [
+                                'schema' => [
+                                    'type' => 'object',
+                                    'properties' => ['term' => ['type' => 'string']],
+                                ],
+                            ],
+                        ],
+                    ],
+                    'responses' => ['200' => ['description' => 'ok']],
+                ],
+            ],
+        ],
+    ];
+
+    $request = (new PostmanGenerator)->generate($openapi)['item'][0]['item'][0]['request'];
+
+    expect($request['method'])->toBe('QUERY')
+        ->and($request['body']['mode'])->toBe('raw')
+        ->and($request['body']['raw'])->toContain('term');
+});

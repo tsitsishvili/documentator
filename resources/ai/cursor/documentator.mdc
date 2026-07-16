@@ -1,57 +1,57 @@
 ---
-description: How to write Laravel API endpoints so tsitsishvili/documentator infers accurate OpenAPI docs, and which attributes override inference.
-globs: app/Http/**/*.php,app/Actions/**/*.php,routes/*.php
+description: Write Laravel endpoints that tsitsishvili/documentator can infer into accurate OpenAPI 3.2 operations, including HTTP QUERY request content.
+globs: app/**/*.php,routes/**/*.php,config/documentator.php
 alwaysApply: false
 ---
 
-# Documentator (tsitsishvili/documentator)
+# Documentator endpoint rules
 
-Auto-inferred, interactive **OpenAPI 3.1** API documentation for Laravel. It reads
-your existing code — routes, FormRequests, inline validation, API Resources and
-return types — and generates the docs; PHP attributes refine anything.
+Follow these rules when editing a matched Laravel API route.
 
-**Golden rule: inference first, attributes last.** Write idiomatic, typed Laravel
-and most docs appear on their own. Add an attribute only to fix or add what
-inference can't see — attributes always win.
+## Inspect before editing
 
-To make an endpoint document well (no annotations needed):
+- Read `config/documentator.php`, the route, middleware, action, request input,
+  response type/expression, and nearby tests.
+- Confirm the URI matches `documentator.routes.match` and is not excluded.
+- Decide whether each input belongs in the path, URI query, header/cookie, or
+  request content.
 
-- Prefer a `[Controller::class, 'method']` route for controller/class metadata;
-  typed closures still support parameter, attribute, and return-expression inference.
-- Add a docblock: **first line = summary**, the rest = description.
-- Type-hint a `FormRequest` (its `rules()` become body params; on **GET/HEAD** they
-  become **query** params) — or inline `$request->validate([...])`.
-- Give the method a **return type**: an API `Resource`, `ResourceCollection`,
-  Eloquent model, or `spatie/laravel-data` object → response schema is inferred.
-- Status follows the verb (`POST → 201`, `DELETE → 204`); errors are added
-  from auth, validation, model binding, `abort*`, authorization, and HTTP exceptions.
+## Prefer inference
 
-Override only the gaps with attributes from `Tsitsishvili\Documentator\Attributes`:
+- Prefer `[Controller::class, 'method']` when class metadata and grouping matter.
+- Write a method docblock: first paragraph is summary; remaining prose is description.
+- Use a type-hinted `FormRequest`, inline validation, request accessors, or a
+  supported Data object for request documentation.
+- Use a concrete Resource/Data/model return type or a readable literal response.
+- Add attributes only for invisible facts or deliberate corrections. Attributes
+  run last; do not duplicate already visible validation or accessors.
+
+## Place request data correctly
+
+- `GET`/`HEAD`: validation becomes URI query parameters; do not emit a body.
+- `QUERY`: use `Route::match(['QUERY'], ...)`; validation remains request content
+  and becomes the OpenAPI 3.2 `query.requestBody`.
+- Other body-bearing methods: validation becomes request-body fields.
+- HTTP `QUERY` content is not the same as URI query parameters.
 
 ```php
-use Tsitsishvili\Documentator\Attributes\{Summary, Group, QueryParam, Response, Authenticated, Hidden};
-
-#[Group('Orders')]
-#[Authenticated]
-#[QueryParam('include', description: 'Comma-separated relations to embed.')]
-#[Response(status: 201, resource: OrderResource::class, description: 'The created order.')]
-public function store(StoreOrderRequest $request): OrderResource { /* ... */ }
+Route::match(['QUERY'], 'api/orders/search', [OrderSearchController::class, 'search']);
 ```
 
-Attributes include `#[Summary]`, `#[Description]`, `#[Group]`,
-`#[TagDescription]`, `#[OperationId]`, `#[PathParam]`, `#[QueryParam]`,
-`#[HeaderParam]`, `#[CookieParam]`, `#[BodyParam]`, `#[RequestMediaType]`,
-`#[Response]`, `#[ResponseHeader]`, `#[Authenticated]`, `#[Server]`,
-`#[Hidden]`, `#[Deprecated]`, `#[SchemaName]`, `#[UsesModel]`.
+Use `Tsitsishvili\Documentator\Attributes` (`Group`, `Authenticated`,
+`QueryParam`, `BodyParam`, `Response`, `ResponseHeader`, `Server`, `Hidden`,
+`Deprecated`, and related attributes) only after checking inference.
 
-Operational notes:
+## Verify
 
-- Docs are **disabled by default** — set `DOCUMENTATOR_ENABLED=true`. UI at `/docs`,
-  spec at `/docs/openapi.json`. Only routes matching `documentator.routes.match`
-  (default `api/*`) are documented.
-- Verify with `php artisan documentator:check` (audits quality, validates the
-  OpenAPI shape) — run it in CI. Use
-  `php artisan documentator:check --against=openapi.json` to catch committed-spec
-  drift, or add `--fail-on=breaking` to allow additive drift. Use
-  `documentator:explain METHOD URI` to trace inference. Also:
-  `documentator:generate` (cache), `documentator:export`, `documentator:postman`.
+```bash
+php artisan documentator:explain QUERY /api/orders/search
+php artisan documentator:check
+php artisan documentator:check --against=openapi.json --fail-on=breaking
+```
+
+`documentator:check` audits introspectability, success schemas, health warnings,
+OpenAPI shape, and optional drift. It does not discover every undocumented input.
+
+If an operation is missing, inspect route matching/exclusions, `#[Hidden]`, and
+action introspectability before adding documentation-only code.

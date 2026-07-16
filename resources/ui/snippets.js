@@ -107,6 +107,7 @@ export function createSnippetController(deps) {
         var headers = {};
         Object.keys(req.headers).forEach(function (k) { headers[k] = req.headers[k]; });
         var method = req.method.toLowerCase();
+        var query = method === 'query';
         var b = req.body;
         var url = req.url.replace(/'/g, "\\'");
         var segments = [];
@@ -118,24 +119,33 @@ export function createSnippetController(deps) {
 
         if (b.mode === 'multipart') {
             delete headers['Content-Type'];
+            if (query) {
+                b.fields.forEach(function (f) {
+                    segments.push("attach('" + f.name + "', '" + String(f.value).replace(/'/g, "\\'") + "')");
+                });
+            }
             b.files.forEach(function (f) {
                 var fn = fileNames(f)[0];
                 segments.push("attach('" + f.name + "', file_get_contents('" + fn + "'), '" + fn + "')");
             });
             if (Object.keys(headers).length) segments.push('withHeaders(' + indentLines(toPhp(headers), '    ') + ')');
             segments.push('asMultipart()');
-            segments.push(method + "('" + url + "', " + indentLines(toPhp(fieldsToObject(b.fields)), '    ') + ')');
+            segments.push(query
+                ? "send('QUERY', '" + url + "')"
+                : method + "('" + url + "', " + indentLines(toPhp(fieldsToObject(b.fields)), '    ') + ')');
         } else {
             // Passing an array body sets the JSON content type for us.
             if (b.mode === 'json') delete headers['Content-Type'];
             if (Object.keys(headers).length) segments.push('withHeaders(' + indentLines(toPhp(headers), '    ') + ')');
             if (b.mode === 'json') {
-                segments.push(method + "('" + url + "', " + indentLines(toPhp(b.value), '    ') + ')');
+                segments.push(query
+                    ? "send('QUERY', '" + url + "', ['json' => " + indentLines(toPhp(b.value), '    ') + '])'
+                    : method + "('" + url + "', " + indentLines(toPhp(b.value), '    ') + ')');
             } else if (b.mode === 'raw') {
                 segments.push("withBody('" + b.value.replace(/'/g, "\\'") + "', 'application/json')");
-                segments.push(method + "('" + url + "')");
+                segments.push(query ? "send('QUERY', '" + url + "')" : method + "('" + url + "')");
             } else {
-                segments.push(method + "('" + url + "')");
+                segments.push(query ? "send('QUERY', '" + url + "')" : method + "('" + url + "')");
             }
         }
         return 'use Illuminate\\Support\\Facades\\Http;\n\n$response = Http::' + segments.join('\n    ->') + ';';
@@ -195,8 +205,9 @@ export function createSnippetController(deps) {
         }
         if (Object.keys(headers).length) args.push('    headers=' + indentLines(toPython(headers), '    ') + ',');
 
-        return 'import requests\n\nresponse = requests.' + req.method.toLowerCase() +
-            '(\n' + args.join('\n') + '\n)\nprint(response.json())';
+        var call = req.method.toLowerCase() === 'query' ? 'request(\"QUERY\",' : req.method.toLowerCase() + '(';
+        return 'import requests\n\nresponse = requests.' + call +
+            '\n' + args.join('\n') + '\n)\nprint(response.json())';
     }
 
     function buildHttpie(req) {
@@ -228,13 +239,17 @@ export function createSnippetController(deps) {
         var lines = ["require 'net/http'", "require 'json'", '', "uri = URI('" + sq(req.url) + "')"];
 
         if (b.mode === 'multipart') {
-            lines.push("request = Net::HTTP::" + req.method.charAt(0).toUpperCase() + req.method.slice(1).toLowerCase() + '.new(uri)');
+            lines.push(req.method.toLowerCase() === 'query'
+                ? 'request = Net::HTTPGenericRequest.new("QUERY", true, true, uri.request_uri)'
+                : "request = Net::HTTP::" + req.method.charAt(0).toUpperCase() + req.method.slice(1).toLowerCase() + '.new(uri)');
             Object.keys(headers).forEach(function (k) { lines.push("request['" + sq(k) + "'] = '" + sq(headers[k]) + "'"); });
             lines.push('# Multipart file uploads are usually easier with a client gem such as Faraday.');
             lines.push('# Fields: ' + JSON.stringify(fieldsToObject(b.fields)));
             b.files.forEach(function (f) { lines.push("# Attach " + f.name + ': ' + fileNames(f).join(', ')); });
         } else {
-            lines.push("request = Net::HTTP::" + req.method.charAt(0).toUpperCase() + req.method.slice(1).toLowerCase() + '.new(uri)');
+            lines.push(req.method.toLowerCase() === 'query'
+                ? 'request = Net::HTTPGenericRequest.new("QUERY", true, true, uri.request_uri)'
+                : "request = Net::HTTP::" + req.method.charAt(0).toUpperCase() + req.method.slice(1).toLowerCase() + '.new(uri)');
             Object.keys(headers).forEach(function (k) { lines.push("request['" + sq(k) + "'] = '" + sq(headers[k]) + "'"); });
             if (b.mode === 'json') lines.push('request.body = JSON.generate(' + JSON.stringify(b.value) + ')');
             else if (b.mode === 'raw') lines.push('request.body = ' + JSON.stringify(b.value));
@@ -361,8 +376,10 @@ export function createSnippetController(deps) {
             if (k.toLowerCase() !== 'content-type') lines.push('client.DefaultRequestHeaders.Add("' + dq(k) + '", "' + dq(headers[k]) + '");');
         });
         lines.push('');
-        lines.push('var response = await client.SendAsync(new HttpRequestMessage(HttpMethod.' +
-            req.method.charAt(0).toUpperCase() + req.method.slice(1).toLowerCase() + ', "' + dq(req.url) + '") { Content = ' + content + ' });');
+        var httpMethod = req.method.toLowerCase() === 'query'
+            ? 'new HttpMethod("QUERY")'
+            : 'HttpMethod.' + req.method.charAt(0).toUpperCase() + req.method.slice(1).toLowerCase();
+        lines.push('var response = await client.SendAsync(new HttpRequestMessage(' + httpMethod + ', "' + dq(req.url) + '") { Content = ' + content + ' });');
         lines.push('Console.WriteLine(await response.Content.ReadAsStringAsync());');
         return lines.join('\n');
     }

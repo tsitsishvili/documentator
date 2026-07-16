@@ -10,6 +10,7 @@ use Illuminate\Support\Str;
 use Tsitsishvili\Documentator\Data\EndpointData;
 use Tsitsishvili\Documentator\Documentator;
 use Tsitsishvili\Documentator\OpenApi\OpenApiGenerator;
+use Tsitsishvili\Documentator\OpenApi\OpenApiMethods;
 use Tsitsishvili\Documentator\Support\OpenApiDiff;
 use Tsitsishvili\Documentator\Support\OpenApiValidator;
 
@@ -184,7 +185,7 @@ final class CheckCommand extends Command
 
         foreach ((array) ($spec['paths'] ?? []) as $methods) {
             foreach ((array) $methods as $method => $operation) {
-                if (! is_array($operation) || ! in_array(strtolower((string) $method), ['get', 'post', 'put', 'patch', 'delete'], true)) {
+                if (! is_array($operation) || ! in_array(strtolower((string) $method), OpenApiMethods::ALL, true)) {
                     continue;
                 }
 

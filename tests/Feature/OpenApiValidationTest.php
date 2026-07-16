@@ -26,7 +26,7 @@ class ValidationSampleController
     }
 }
 
-it('emits an internally valid OpenAPI 3.1 document', function () {
+it('emits an internally valid OpenAPI 3.2 document', function () {
     Route::post('api/validation-samples', [ValidationSampleController::class, 'store']);
 
     $spec = app(Documentator::class)->toOpenApi();
@@ -36,7 +36,7 @@ it('emits an internally valid OpenAPI 3.1 document', function () {
 
 it('reports invalid refs and legacy nullable schemas', function () {
     $spec = [
-        'openapi' => '3.1.0',
+        'openapi' => '3.2.0',
         'info' => ['title' => 'API', 'version' => '1.0.0'],
         'paths' => [
             '/api/broken' => [
@@ -67,7 +67,7 @@ it('reports invalid refs and legacy nullable schemas', function () {
 
 it('reports path parameter mismatches and duplicate operation ids', function () {
     $spec = [
-        'openapi' => '3.1.0',
+        'openapi' => '3.2.0',
         'info' => ['title' => 'API', 'version' => '1.0.0'],
         'paths' => [
             '/api/posts/{post:slug}' => [
@@ -98,4 +98,19 @@ it('reports path parameter mismatches and duplicate operation ids', function () 
         'GET /api/articles/{article} defines path parameter unused that is not present in the path template',
         'duplicate operationId showPost on GET /api/articles/{article}',
     );
+});
+
+it('validates QUERY operations', function () {
+    $spec = [
+        'openapi' => '3.2.0',
+        'info' => ['title' => 'API', 'version' => '1.0.0'],
+        'paths' => [
+            '/api/search' => [
+                'query' => [],
+            ],
+        ],
+    ];
+
+    expect(OpenApiValidator::validate($spec))
+        ->toContain('QUERY /api/search must define responses');
 });
