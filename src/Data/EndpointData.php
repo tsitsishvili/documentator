@@ -82,6 +82,27 @@ final class EndpointData
     public array $provenance = [];
 
     /**
+     * Seed inferred URI query parameters, keeping any already-documented value
+     * and skipping names the endpoint documents as request content.
+     *
+     * A QUERY or POST search operation carries inputs such as `page` in its
+     * body, where Request::input() reads them from; also emitting them as URI
+     * parameters would document one input in two places.
+     *
+     * @param  array<string, ParameterData>  $parameters
+     */
+    public function seedQueryParameters(array $parameters): void
+    {
+        foreach ($parameters as $name => $parameter) {
+            if (isset($this->bodyParameters[$name])) {
+                continue;
+            }
+
+            $this->queryParameters[$name] ??= $parameter;
+        }
+    }
+
+    /**
      * The non-HEAD/OPTIONS HTTP verbs OpenAPI should emit operations for.
      *
      * @return array<int, string>

@@ -69,13 +69,9 @@ final class ExtractResponses implements ExtractionStrategy
             );
 
             if ($paginated) {
-                $queryParameters = $collection['jsonApiPaginated']
+                $endpoint->seedQueryParameters($collection['jsonApiPaginated']
                     ? PaginationSchema::jsonApiQueryParameters()
-                    : PaginationSchema::queryParameters();
-
-                foreach ($queryParameters as $name => $param) {
-                    $endpoint->queryParameters[$name] ??= $param;
-                }
+                    : PaginationSchema::queryParameters());
             }
 
             if ($jsonApi) {
@@ -105,9 +101,7 @@ final class ExtractResponses implements ExtractionStrategy
                 schemaName: $this->schemaName($class),
             );
 
-            foreach (PaginationSchema::queryParameters() as $name => $param) {
-                $endpoint->queryParameters[$name] ??= $param;
-            }
+            $endpoint->seedQueryParameters(PaginationSchema::queryParameters());
         } elseif (is_subclass_of($class, JsonResource::class)) {
             $jsonApi = $this->schemas->isJsonApiResource($class);
             $endpoint->responses[$status] ??= new ResponseData(
