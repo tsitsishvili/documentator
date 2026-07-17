@@ -115,9 +115,7 @@ final class ExtractLaravelActions implements ExtractionStrategy
                 collection: $returnClass,
             );
 
-            foreach (PaginationSchema::queryParameters() as $name => $param) {
-                $endpoint->queryParameters[$name] ??= $param;
-            }
+            $endpoint->seedQueryParameters(PaginationSchema::queryParameters());
         } elseif (is_subclass_of($returnClass, JsonResource::class)) {
             $jsonApi = $this->schemas->isJsonApiResource($returnClass);
             $endpoint->responses[$status] ??= new ResponseData(

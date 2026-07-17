@@ -217,9 +217,7 @@ final class ExtractAttributes implements ExtractionStrategy
             );
 
             if ($response->paginated) {
-                foreach (PaginationSchema::queryParameters() as $name => $param) {
-                    $endpoint->queryParameters[$name] ??= $param;
-                }
+                $endpoint->seedQueryParameters(PaginationSchema::queryParameters());
             }
         }
 

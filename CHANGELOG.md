@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.0.3] - 2026-07-17
+
+### Fixed
+
+- **Pagination parameters documented twice.** A paginated response no longer
+  seeds `page` and `per_page` as URI query parameters when the endpoint already
+  documents them as request content. `QUERY` and `POST` search operations carry
+  those inputs in the request body, so emitting them as URI parameters as well
+  described a single input in two places.
+
 ## [2.0.2] - 2026-07-16
 
 ### Fixed
@@ -440,7 +450,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (with a Scalar driver), Postman export, and the `documentator:generate`,
   `documentator:export` and `documentator:postman` commands.
 
-[Unreleased]: https://github.com/tsitsishvili/documentator/compare/v2.0.0...HEAD
+[Unreleased]: https://github.com/tsitsishvili/documentator/compare/v2.0.3...HEAD
+[2.0.3]: https://github.com/tsitsishvili/documentator/compare/v2.0.2...v2.0.3
+[2.0.2]: https://github.com/tsitsishvili/documentator/compare/v2.0.1...v2.0.2
+[2.0.1]: https://github.com/tsitsishvili/documentator/compare/v2.0.0...v2.0.1
 [2.0.0]: https://github.com/tsitsishvili/documentator/compare/v1.8.0...v2.0.0
 [1.8.0]: https://github.com/tsitsishvili/documentator/compare/v1.7.1...v1.8.0
 [1.7.1]: https://github.com/tsitsishvili/documentator/compare/v1.7.0...v1.7.1
