@@ -64,6 +64,10 @@ php artisan documentator:check
 php artisan documentator:check --against=openapi.json --fail-on=breaking
 ```
 
+For changed endpoint feature tests, use
+`$response->assertMatchesDocumentation()` to verify the real response against
+the generated operation.
+
 Do not describe `documentator:check` as exhaustive parameter detection. It
 checks action introspectability and success schemas, reports health warnings,
 validates Documentator's emitted shape, and optionally compares contract drift.

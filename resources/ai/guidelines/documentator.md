@@ -74,6 +74,10 @@ php artisan documentator:check --against=openapi.json --fail-on=breaking
 php artisan documentator:export openapi.json
 ```
 
+In Laravel feature tests for changed endpoints, chain
+`->assertMatchesDocumentation()` onto the `TestResponse` to verify its real
+status, media type, and body against the generated operation.
+
 `documentator:check` audits action introspectability and success schemas, reports
 documentation-health warnings, runs Documentator's OpenAPI checks, and can
 compare a committed spec. It is not a general detector for every undocumented

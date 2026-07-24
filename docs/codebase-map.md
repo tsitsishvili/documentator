@@ -21,8 +21,8 @@ Runtime flow:
 4. The strategies fill `EndpointData`, `ParameterData`, and `ResponseData`.
 5. `src/OpenApi/OpenApiGenerator.php` converts endpoint data into an OpenAPI
    3.2 array.
-6. HTTP controllers, Artisan commands, and the Postman generator consume the
-   OpenAPI array.
+6. HTTP controllers, Artisan commands, the Postman generator, and feature-test
+   contract assertions consume the OpenAPI array.
 
 ## Main Entry Points
 
@@ -151,6 +151,15 @@ Commands are registered in `src/DocumentatorServiceProvider.php`.
 | `src/Support/OpenApiValidator.php` | Lightweight OpenAPI sanity checker used by `documentator:check`.                                                                 |
 | `src/Support/OpenApiDiff.php`      | Human-readable OpenAPI diff used for drift checks.                                                                               |
 
+## Runtime Contract Verification
+
+| File                                           | Purpose                                                                                                                |
+|------------------------------------------------|------------------------------------------------------------------------------------------------------------------------|
+| `src/Testing/TestResponseContract.php`         | Connects Laravel's `TestResponse` to the generated document and raises PHPUnit assertion failures.                    |
+| `src/Testing/OpenApiResponseValidator.php`     | Matches the request path/method and validates response status, media type, JSON decoding, and the selected schema.     |
+| `src/Testing/JsonSchemaValidator.php`          | Validates runtime values against Documentator's emitted JSON Schema vocabulary, including refs and composites.        |
+| `src/DocumentatorServiceProvider.php`          | Registers the `assertMatchesDocumentation()` `TestResponse` macro and its cached per-test-container contract service. |
+
 ## Common Fragment Finder
 
 | If You Need To Change...                         | Start Here                                                                                                                 |
@@ -180,6 +189,7 @@ Commands are registered in `src/DocumentatorServiceProvider.php`.
 | Exported OpenAPI file                            | `src/Commands/ExportCommand.php`                                                                                           |
 | Postman export                                   | `src/Commands/PostmanCommand.php`, `src/Postman/PostmanGenerator.php`                                                      |
 | Docs quality checks                              | `src/Commands/CheckCommand.php`, `src/Support/OpenApiValidator.php`, `src/Support/OpenApiDiff.php`                         |
+| Runtime response contract assertions             | `src/Testing/TestResponseContract.php`, `src/Testing/OpenApiResponseValidator.php`, `src/Testing/JsonSchemaValidator.php`  |
 | Config defaults                                  | `config/documentator.php`                                                                                                  |
 | Package discovery and scripts                    | `composer.json`                                                                                                            |
 
@@ -195,6 +205,7 @@ Commands are registered in `src/DocumentatorServiceProvider.php`.
 | Data objects                             | `tests/Feature/DataObjectTest.php`                                                                                                                               |
 | Error responses and auth                 | `tests/Feature/ErrorResponsesTest.php`, `tests/Feature/GlobalAuthTest.php`                                                                                       |
 | Commands, validation, drift              | `tests/Feature/CheckCommandTest.php`, `tests/Feature/OpenApiDiffTest.php`                                                                                        |
+| Runtime response contracts               | `tests/Feature/ContractVerificationTest.php`                                                                                                                   |
 | Docs UI and assets                       | `tests/Feature/DocsUiTest.php`, `tests/Browser/built-in-ui.visual.spec.mjs`                                                                                      |
 | Postman export                           | `tests/Feature/PostmanTest.php`                                                                                                                                  |
 | Packaging                                | `tests/Feature/PackagingTest.php`, `tests/Feature/PackageImprovementsTest.php`                                                                                   |

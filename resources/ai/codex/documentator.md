@@ -68,6 +68,12 @@ When the project commits its contract, also run:
 php artisan documentator:check --against=openapi.json --fail-on=breaking
 ```
 
+For changed endpoint feature tests, verify the runtime response too:
+
+```php
+$this->getJson('/api/orders/42')->assertMatchesDocumentation();
+```
+
 Inspect the generated operation when placement or schema details matter. Report
 what was inferred versus overridden. `documentator:check` audits introspectable
 actions, success schemas, health warnings, OpenAPI shape, and optional drift; it

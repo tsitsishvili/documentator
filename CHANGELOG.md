@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Runtime response contract verification.** Laravel feature tests can call
+  `assertMatchesDocumentation()` on a `TestResponse` to verify that the real
+  route, status, media type, and response body match the generated OpenAPI
+  contract. Failures point to the exact nested body field and understand local
+  schema references, composites, enums, formats, bounds, and object/array
+  constraints.
+
 ## [2.0.3] - 2026-07-17
 
 ### Fixed
