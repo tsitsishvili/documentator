@@ -17,6 +17,8 @@ When changing an API endpoint:
 - Add `Tsitsishvili\Documentator\Attributes` only for gaps or intentional overrides.
 - Verify with `php artisan documentator:explain METHOD /uri` and
   `php artisan documentator:check`.
+- In feature tests, use `->assertMatchesDocumentation()` on changed endpoint
+  responses.
 
 Use the **`documentator-api-docs`** skill for the full workflow, inference map,
 attribute guidance, troubleshooting, contract checks, and examples.

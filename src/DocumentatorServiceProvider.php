@@ -6,6 +6,7 @@ namespace Tsitsishvili\Documentator;
 
 use Illuminate\Contracts\Routing\Registrar as Router;
 use Illuminate\Support\ServiceProvider;
+use Illuminate\Testing\TestResponse;
 use Tsitsishvili\Documentator\Commands\CheckCommand;
 use Tsitsishvili\Documentator\Commands\ExplainCommand;
 use Tsitsishvili\Documentator\Commands\ExportCommand;
@@ -29,6 +30,7 @@ use Tsitsishvili\Documentator\Http\Controllers\OpenApiController;
 use Tsitsishvili\Documentator\Http\Middleware\Authorize;
 use Tsitsishvili\Documentator\Http\Middleware\EnsureDocsEnabled;
 use Tsitsishvili\Documentator\OpenApi\OpenApiGenerator;
+use Tsitsishvili\Documentator\Testing\TestResponseContract;
 
 final class DocumentatorServiceProvider extends ServiceProvider
 {
@@ -73,12 +75,15 @@ final class DocumentatorServiceProvider extends ServiceProvider
                 $app->make(OpenApiGenerator::class),
             );
         });
+
+        $this->app->singleton(TestResponseContract::class);
     }
 
     public function boot(): void
     {
         $this->loadViewsFrom(__DIR__.'/../resources/views', 'documentator');
         $this->registerRoutes($this->app->make('router'));
+        $this->registerTestResponseMacro();
 
         if ($this->app->runningInConsole()) {
             $this->commands([GenerateCommand::class, ExportCommand::class, PostmanCommand::class, CheckCommand::class, ExplainCommand::class]);
@@ -129,5 +134,20 @@ final class DocumentatorServiceProvider extends ServiceProvider
                 ->where('section', '[A-Za-z0-9_-]+')
                 ->name('documentator.ui.section');
         });
+    }
+
+    private function registerTestResponseMacro(): void
+    {
+        if (! class_exists(TestResponse::class) || TestResponse::hasMacro('assertMatchesDocumentation')) {
+            return;
+        }
+
+        TestResponse::macro(
+            'assertMatchesDocumentation',
+            function (?string $method = null, ?string $uri = null): TestResponse {
+                /** @var TestResponse $this */
+                return app(TestResponseContract::class)->assert($this, $method, $uri);
+            },
+        );
     }
 }

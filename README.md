@@ -331,6 +331,41 @@ php artisan documentator:check --against=openapi.json --fail-on=breaking # allow
 php artisan documentator:explain GET /api/orders       # show where every inferred fact came from
 ```
 
+### Verifying real responses in feature tests
+
+Static inference and drift checks verify the generated document; a feature test
+can also prove that a real Laravel response satisfies it:
+
+```php
+$response = $this->getJson('/api/orders/42');
+
+$response
+    ->assertMatchesDocumentation()
+    ->assertOk();
+```
+
+`assertMatchesDocumentation()` uses the original test request to find the
+documented operation, then checks its status, response media type, and body
+schema. Validation follows local `$ref`s and supports the object, array, scalar,
+format, enum, bound, and `oneOf` / `anyOf` / `allOf` schemas Documentator emits.
+Failures identify the mismatched field:
+
+```text
+Response contract validation failed for GET /api/orders/42:
+ - body.data.total: expected integer, got string
+```
+
+When constructing a `TestResponse` manually, pass the request identity
+explicitly:
+
+```php
+$response->assertMatchesDocumentation('GET', '/api/orders/42');
+```
+
+This assertion verifies responses only; keep Laravel validation and endpoint
+tests responsible for request behavior. It never calls endpoints on its own, so
+generation cannot trigger writes or external side effects.
+
 ## Configuration
 
 Key options in `config/documentator.php`:

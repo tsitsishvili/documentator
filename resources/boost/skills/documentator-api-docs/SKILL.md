@@ -270,6 +270,12 @@ success schemas, reports health warnings, runs Documentator's OpenAPI checks,
 and optionally compares drift. Do not present it as exhaustive discovery of
 every undocumented parameter.
 
+In a Laravel feature test, validate the real response contract with:
+
+```php
+$this->getJson('/api/orders/42')->assertMatchesDocumentation();
+```
+
 ## Finish with this checklist
 
 1. Confirm route inclusion and method semantics.
@@ -278,4 +284,5 @@ every undocumented parameter.
 4. Confirm auth, group/version, errors, status, and media type.
 5. Remove redundant attributes that duplicate readable code.
 6. Run `documentator:explain` for the operation.
-7. Run `documentator:check` and relevant feature/contract tests.
+7. Run `documentator:check`, relevant feature tests, and
+   `assertMatchesDocumentation()` for changed responses.
