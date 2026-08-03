@@ -5,6 +5,6 @@
     "test:browser": "playwright test tests/Browser"
   },
   "devDependencies": {
-    "@playwright/test": "^1.62.0"
+    "@playwright/test": "^1.62.1"
   }
 }
