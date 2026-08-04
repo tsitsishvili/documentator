@@ -44,6 +44,24 @@ final class OpenApiDiff
             $changes = array_merge($changes, self::comparePath($path, $expectedPaths[$path], $actualPaths[$path]));
         }
 
+        $expectedWebhooks = (array) ($expected['webhooks'] ?? []);
+        $actualWebhooks = (array) ($actual['webhooks'] ?? []);
+
+        foreach (array_diff(array_keys($expectedWebhooks), array_keys($actualWebhooks)) as $name) {
+            $changes[] = self::change('breaking', "webhook {$name}", 'webhook removed');
+        }
+
+        foreach (array_diff(array_keys($actualWebhooks), array_keys($expectedWebhooks)) as $name) {
+            $changes[] = self::change('non-breaking', "webhook {$name}", 'webhook added');
+        }
+
+        foreach (array_intersect(array_keys($expectedWebhooks), array_keys($actualWebhooks)) as $name) {
+            $changes = array_merge(
+                $changes,
+                self::comparePath("webhook {$name}", $expectedWebhooks[$name], $actualWebhooks[$name]),
+            );
+        }
+
         return $changes;
     }
 
@@ -74,6 +92,7 @@ final class OpenApiDiff
                 self::compareParameters($location, $expected[$verb]['parameters'] ?? [], $actual[$verb]['parameters'] ?? []),
                 self::compareRequestBody($location, $expected[$verb]['requestBody'] ?? null, $actual[$verb]['requestBody'] ?? null),
                 self::compareResponses($location, $expected[$verb]['responses'] ?? [], $actual[$verb]['responses'] ?? []),
+                self::compareCallbacks($location, $expected[$verb]['callbacks'] ?? [], $actual[$verb]['callbacks'] ?? []),
             );
         }
 
@@ -257,6 +276,50 @@ final class OpenApiDiff
      * @param  array<string, mixed>  $actual
      * @return array<int, array{severity: string, location: string, message: string}>
      */
+    private static function compareCallbacks(string $location, array $expected, array $actual): array
+    {
+        $changes = [];
+
+        foreach (array_diff(array_keys($expected), array_keys($actual)) as $name) {
+            $changes[] = self::change('breaking', $location, "callback removed: {$name}");
+        }
+
+        foreach (array_diff(array_keys($actual), array_keys($expected)) as $name) {
+            $changes[] = self::change('non-breaking', $location, "callback added: {$name}");
+        }
+
+        foreach (array_intersect(array_keys($expected), array_keys($actual)) as $name) {
+            $oldExpressions = is_array($expected[$name]) ? $expected[$name] : [];
+            $newExpressions = is_array($actual[$name]) ? $actual[$name] : [];
+
+            foreach (array_diff(array_keys($oldExpressions), array_keys($newExpressions)) as $expression) {
+                $changes[] = self::change('breaking', "{$location} callback {$name}", "callback expression removed: {$expression}");
+            }
+
+            foreach (array_diff(array_keys($newExpressions), array_keys($oldExpressions)) as $expression) {
+                $changes[] = self::change('non-breaking', "{$location} callback {$name}", "callback expression added: {$expression}");
+            }
+
+            foreach (array_intersect(array_keys($oldExpressions), array_keys($newExpressions)) as $expression) {
+                $changes = array_merge(
+                    $changes,
+                    self::comparePath(
+                        "{$location} callback {$name} {$expression}",
+                        $oldExpressions[$expression],
+                        $newExpressions[$expression],
+                    ),
+                );
+            }
+        }
+
+        return $changes;
+    }
+
+    /**
+     * @param  array<string, mixed>  $expected
+     * @param  array<string, mixed>  $actual
+     * @return array<int, array{severity: string, location: string, message: string}>
+     */
     private static function compareResponseHeaders(string $location, array $expected, array $actual): array
     {
         $changes = [];
@@ -298,11 +361,23 @@ final class OpenApiDiff
         }
 
         foreach (array_intersect(array_keys($expected), array_keys($actual)) as $mediaType) {
-            $oldSchema = $expected[$mediaType]['schema'] ?? null;
-            $newSchema = $actual[$mediaType]['schema'] ?? null;
+            $oldStreaming = array_key_exists('itemSchema', (array) $expected[$mediaType]);
+            $newStreaming = array_key_exists('itemSchema', (array) $actual[$mediaType]);
+
+            if ($oldStreaming !== $newStreaming) {
+                $changes[] = self::change(
+                    'breaking',
+                    "{$location} {$mediaType}",
+                    $newStreaming ? 'content changed to a stream' : 'stream changed to complete content',
+                );
+            }
+
+            $oldSchema = $expected[$mediaType][$oldStreaming ? 'itemSchema' : 'schema'] ?? null;
+            $newSchema = $actual[$mediaType][$newStreaming ? 'itemSchema' : 'schema'] ?? null;
 
             if (is_array($oldSchema) && is_array($newSchema)) {
-                $changes = array_merge($changes, self::compareSchema("{$location} {$mediaType}", $oldSchema, $newSchema));
+                $schemaLocation = $oldStreaming || $newStreaming ? ' stream item' : '';
+                $changes = array_merge($changes, self::compareSchema("{$location} {$mediaType}{$schemaLocation}", $oldSchema, $newSchema));
             }
         }
 

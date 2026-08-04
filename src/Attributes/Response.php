@@ -25,5 +25,7 @@ final class Response
         public bool $collection = false,
         public bool $paginated = false,
         public ?bool $paginationLinks = null,
+        public ?string $mediaType = null,
+        public bool $stream = false,
     ) {}
 }

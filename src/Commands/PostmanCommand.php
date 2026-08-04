@@ -24,7 +24,7 @@ final class PostmanCommand extends Command
 
         File::ensureDirectoryExists(dirname($path));
         File::put($path, json_encode(
-            $postman->generate($documentator->toOpenApi()),
+            $postman->generate($documentator->toOpenApi('3.2')),
             JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE,
         ));
 

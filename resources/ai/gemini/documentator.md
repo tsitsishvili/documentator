@@ -52,7 +52,9 @@ Status defaults: `POST → 201`, `DELETE → 204`, otherwise `200`.
 
 Use `Tsitsishvili\Documentator\Attributes` such as `Group`, `Authenticated`,
 `QueryParam`, `BodyParam`, `Response`, `ResponseHeader`, `Server`, `Hidden`, or
-`Deprecated` only to fill or intentionally override gaps.
+`Deprecated` only to fill or intentionally override gaps. Use `Callback` and
+`Webhook` for out-of-band requests, and `Response(stream: true)` for sequential
+response items.
 
 ## Validate the result
 
@@ -67,6 +69,8 @@ php artisan documentator:check --against=openapi.json --fail-on=breaking
 For changed endpoint feature tests, use
 `$response->assertMatchesDocumentation()` to verify the real response against
 the generated operation.
+Use `$response->recordAsDocumentationExample()` only when that validated
+feature-test response should become a named, redacted OpenAPI example.
 
 Do not describe `documentator:check` as exhaustive parameter detection. It
 checks action introspectability and success schemas, reports health warnings,

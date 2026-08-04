@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **OpenAPI 3.1 compatibility projection.** `documentator:export`,
+  `documentator:generate`, and `documentator:check` accept `--openapi=3.1|3.2`.
+  OpenAPI 3.2 remains native; incompatible `QUERY` and streaming constructs are
+  reported, with explicit `--omit-unsupported` support for reduced exports.
+- **Recorded real response examples.** Feature tests can call
+  `recordAsDocumentationExample()` to validate, redact, persist, and publish a
+  named OpenAPI response example without Documentator dispatching any requests.
+- **Generated TypeScript client.** `documentator:typescript` writes a
+  dependency-free typed `fetch` client with path/query/header/cookie inputs,
+  body encoding, bearer auth, structured errors, HTTP `QUERY`, and readable
+  streaming responses.
+- **Event-driven contracts.** New `#[Callback]` and `#[Webhook]` attributes
+  describe out-of-band requests, while `#[Response(stream: true)]` emits
+  OpenAPI 3.2 streaming `itemSchema` content. Validation, drift checks, the
+  built-in UI, compatibility reports, and TypeScript output understand them.
+
 ## [2.1.0] - 2026-07-24
 
 ### Added

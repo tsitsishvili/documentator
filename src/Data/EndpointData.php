@@ -61,6 +61,12 @@ final class EndpointData
     /** @var array<int, ResponseData> keyed by status code */
     public array $responses = [];
 
+    /** @var array<string, CallbackData> */
+    public array $callbacks = [];
+
+    /** @var array<string, WebhookData> */
+    public array $webhooks = [];
+
     public bool $authenticated = false;
 
     public ?string $securityScheme = null;

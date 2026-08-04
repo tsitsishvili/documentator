@@ -161,7 +161,7 @@ export function start(deps) {
 
     function responseSchema(response) {
         var media = responseMedia(response);
-        return media && media.schema ? resolveSchema(media.schema) : null;
+        return media && (media.schema || media.itemSchema) ? resolveSchema(media.schema || media.itemSchema) : null;
     }
 
     /* A concrete example for a response, from `example`, the first of `examples`,
@@ -174,7 +174,7 @@ export function start(deps) {
             var first = media.examples[Object.keys(media.examples)[0]];
             if (first && first.value !== undefined) return first.value;
         }
-        var schema = resolveSchema(media.schema);
+        var schema = resolveSchema(media.schema || media.itemSchema);
         if (schema && schema.example !== undefined) return schema.example;
         return undefined;
     }
@@ -1259,12 +1259,15 @@ export function start(deps) {
             html += codes.map(function (code) {
                 var r = responses[code] || {};
                 var schema = responseSchema(r);
+                var media = responseMedia(r);
+                var streaming = !!(media && media.itemSchema);
                 var rows = schema ? rowsFromSchema(schema) : '';
                 var example = responseExample(r);
                 var detail = '';
                 var headers = responseHeadersHtml(r);
                 if (rows) {
-                    detail = '<div class="response-block__schema">' + rows + '</div>';
+                    detail = '<div class="response-block__schema">' +
+                        (streaming ? '<p class="row__desc">Streaming item schema</p>' : '') + rows + '</div>';
                 } else if (example !== undefined) {
                     detail = '<div class="response-block__schema response-block__example">' + exampleBlock(example) + '</div>';
                 } else if (schema) {
@@ -2125,6 +2128,7 @@ export function start(deps) {
         copyText: copyText,
         entryById: entryById,
         requestBodyContent: requestBodyContent,
+        responseMedia: responseMedia,
         responseSchema: responseSchema,
         resolveSchema: resolveSchema,
         typesOf: typesOf,

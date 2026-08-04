@@ -2,6 +2,7 @@
 
 declare(strict_types=1);
 
+use Illuminate\Support\Facades\Route;
 use Tsitsishvili\Documentator\Postman\PostmanGenerator;
 
 it('converts an OpenAPI document into a Postman v2.1 collection', function () {
@@ -163,4 +164,20 @@ it('exports QUERY operations with their request body', function () {
     expect($request['method'])->toBe('QUERY')
         ->and($request['body']['mode'])->toBe('raw')
         ->and($request['body']['raw'])->toContain('term');
+});
+
+it('exports the complete operation model when the public OpenAPI target is 3.1', function () {
+    config(['documentator.openapi.version' => '3.1']);
+
+    Route::match(['QUERY'], 'api/search', fn () => []);
+
+    $path = sys_get_temp_dir().'/documentator-postman-'.uniqid().'.json';
+
+    $this->artisan('documentator:postman', ['path' => $path])->assertExitCode(0);
+
+    $collection = json_decode((string) file_get_contents($path), true, flags: JSON_THROW_ON_ERROR);
+
+    expect($collection['item'][0]['item'][0]['request']['method'])->toBe('QUERY');
+
+    @unlink($path);
 });

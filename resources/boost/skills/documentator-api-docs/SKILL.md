@@ -1,11 +1,12 @@
 ---
 name: documentator-api-docs
-description: Build, change, diagnose, or verify Laravel API endpoints documented by tsitsishvili/documentator. Use for routes, controllers, closures, FormRequests, inline validation, API Resources, Eloquent models, Spatie Data, Laravel Actions, HTTP QUERY operations, Documentator attributes, auth/grouping configuration, missing or inaccurate generated operations, Artisan documentation checks, OpenAPI contract drift, and Postman exports.
+description: Build, change, diagnose, or verify Laravel API endpoints documented by tsitsishvili/documentator. Use for routes, controllers, closures, FormRequests, inline validation, API Resources, Eloquent models, Spatie Data, Laravel Actions, HTTP QUERY operations, callbacks, webhooks, streaming responses, recorded examples, TypeScript clients, OpenAPI 3.1 compatibility, Documentator attributes, auth/grouping configuration, missing or inaccurate generated operations, Artisan documentation checks, contract drift, and exports.
 ---
 
 # Build self-documenting Laravel endpoints
 
-Generate accurate **OpenAPI 3.2** through application code. Prefer inference
+Generate accurate native **OpenAPI 3.2** through application code, with an
+explicit 3.1 compatibility projection when downstream tooling needs it. Prefer inference
 from idiomatic Laravel; add Documentator attributes only for facts the code
 cannot express or inference cannot see. Treat an attribute as an intentional
 last-write-wins override.
@@ -42,6 +43,7 @@ Decide where each fact belongs:
 | Auth | Middleware/config, global auth, or `#[Authenticated]` |
 | Group/version | Config/controller inference or `#[Group]` |
 | Visibility/lifecycle | `#[Hidden]` / `#[Deprecated]` |
+| Callback/webhook/stream | `#[Callback]`, `#[Webhook]`, or `#[Response(stream: true)]` |
 
 Avoid describing the same fact twice unless the attribute deliberately corrects
 an inferred value.
@@ -162,6 +164,9 @@ an explicit content type inference cannot determine.
   `mergeWhen` fields optional.
 - Expect `POST → 201`, `DELETE → 204`, otherwise `200`, unless an explicit
   response/status overrides the convention.
+- Describe sequential NDJSON, JSON Lines, or SSE responses explicitly with
+  `#[Response(stream: true, mediaType: ...)]`; the declared schema is one item,
+  not the complete stream.
 
 ### Errors and integrations
 
@@ -182,6 +187,7 @@ Import attributes from `Tsitsishvili\Documentator\Attributes`.
 | `PathParam`, `QueryParam`, `HeaderParam`, `CookieParam` | Add invisible request parameters |
 | `BodyParam`, `RequestMediaType` | Add invisible request content or media type |
 | `Response`, `ResponseHeader` | Add/override response contracts |
+| `Callback`, `Webhook` | Describe provider-initiated out-of-band requests |
 | `Authenticated` | Require a configured security scheme |
 | `Server` | Add an operation-specific server |
 | `SchemaName`, `UsesModel` | Control reusable schema naming/model association |
@@ -220,6 +226,9 @@ public function store(StoreOrderRequest $request): OrderResource
   `global_path_parameters`.
 - Keep `routes.match`, exclusions, and middleware exclusions aligned with the
   intended public API surface.
+- Keep OpenAPI 3.2 as the native target when the API uses `QUERY` or streaming
+  `itemSchema`. Use a 3.1 projection only for downstream compatibility, and
+  never silently redesign `QUERY` as `POST`.
 
 ## Diagnose unexpected output
 
@@ -262,7 +271,9 @@ php artisan documentator:check --against=openapi.json  # compare a committed con
 php artisan documentator:explain METHOD /api/path      # show inference/override provenance
 php artisan documentator:generate                      # build the cached document
 php artisan documentator:export openapi.json           # export OpenAPI JSON
+php artisan documentator:export openapi.json --openapi=3.1 # compatibility projection
 php artisan documentator:postman                       # export a Postman collection
+php artisan documentator:typescript api-client.ts      # generate a typed fetch client
 ```
 
 Describe `documentator:check` precisely: it audits action introspectability and
@@ -275,6 +286,16 @@ In a Laravel feature test, validate the real response contract with:
 ```php
 $this->getJson('/api/orders/42')->assertMatchesDocumentation();
 ```
+
+Record a real, redacted named example only from an existing feature test:
+
+```php
+$this->getJson('/api/orders/42')
+    ->recordAsDocumentationExample('order found')
+    ->assertOk();
+```
+
+Recording validates first and never dispatches an endpoint automatically.
 
 ## Finish with this checklist
 

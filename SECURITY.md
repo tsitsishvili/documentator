@@ -19,6 +19,13 @@ token-bearing and apply the same XSS controls you use for the rest of the app.
 When using the optional Scalar UI driver, prefer a self-hosted asset URL so you
 can apply your own CSP and Subresource Integrity policy.
 
+`recordAsDocumentationExample()` writes real feature-test response data to the
+configured `examples.path`. Common secret-bearing keys are redacted by default,
+but applications must extend `examples.redact` for domain-specific secrets and
+review recorded files before publishing or committing them. Do not record
+production responses or rely on key-name redaction as a substitute for safe test
+fixtures.
+
 ## Reporting a Vulnerability
 
 Please do not open a public issue for suspected security vulnerabilities.

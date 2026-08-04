@@ -6,7 +6,9 @@ namespace Tsitsishvili\Documentator\Commands;
 
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\File;
+use InvalidArgumentException;
 use Tsitsishvili\Documentator\Documentator;
+use Tsitsishvili\Documentator\OpenApi\OpenApiCompatibilityException;
 use Tsitsishvili\Documentator\OpenApi\OpenApiSections;
 
 /**
@@ -15,13 +17,25 @@ use Tsitsishvili\Documentator\OpenApi\OpenApiSections;
  */
 final class GenerateCommand extends Command
 {
-    protected $signature = 'documentator:generate {--path= : Override the output path for the OpenAPI JSON}';
+    protected $signature = 'documentator:generate
+        {--path= : Override the output path for the OpenAPI JSON}
+        {--openapi= : Target OpenAPI version (3.1 or 3.2)}
+        {--omit-unsupported : Explicitly omit constructs unavailable in the target version}';
 
     protected $description = 'Generate the OpenAPI document and cache it to disk';
 
     public function handle(Documentator $documentator, OpenApiSections $sections): int
     {
-        $spec = $documentator->toOpenApi();
+        try {
+            $spec = $documentator->toOpenApi(
+                $this->option('openapi'),
+                (bool) $this->option('omit-unsupported'),
+            );
+        } catch (InvalidArgumentException|OpenApiCompatibilityException $exception) {
+            $this->error($exception->getMessage());
+
+            return self::FAILURE;
+        }
 
         $path = $this->option('path') ?: config('documentator.cache.path');
 

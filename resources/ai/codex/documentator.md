@@ -48,7 +48,8 @@ public function search(SearchOrdersRequest $request): OrderCollection
 Use attributes from `Tsitsishvili\Documentator\Attributes` only where needed:
 `Summary`, `Description`, `Group`, `OperationId`, `PathParam`, `QueryParam`,
 `HeaderParam`, `CookieParam`, `BodyParam`, `RequestMediaType`, `Response`,
-`ResponseHeader`, `Authenticated`, `Server`, `Hidden`, and `Deprecated`.
+`ResponseHeader`, `Callback`, `Webhook`, `Authenticated`, `Server`, `Hidden`,
+and `Deprecated`. Use `Response(stream: true)` for sequential response items.
 
 Do not duplicate a visible `FormRequest` field with `#[BodyParam]`, or a visible
 request accessor with `#[QueryParam]`, unless correcting inference deliberately.
@@ -73,6 +74,9 @@ For changed endpoint feature tests, verify the runtime response too:
 ```php
 $this->getJson('/api/orders/42')->assertMatchesDocumentation();
 ```
+
+Use `recordAsDocumentationExample()` only when an existing, validated feature
+test response should be published as a redacted named example.
 
 Inspect the generated operation when placement or schema details matter. Report
 what was inferred versus overridden. `documentator:check` audits introspectable

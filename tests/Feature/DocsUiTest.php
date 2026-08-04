@@ -81,6 +81,22 @@ it('ships persistent filters and virtualized sidebar assets', function () {
         ->toContain('contain: layout style paint');
 });
 
+it('ships streaming schema and TypeScript snippet support', function () {
+    $core = $this->get('/docs/assets/core.js')
+        ->assertOk()
+        ->getContent();
+    $snippets = $this->get('/docs/assets/snippets.js')
+        ->assertOk()
+        ->getContent();
+
+    expect($core)
+        ->toContain('media.schema || media.itemSchema')
+        ->toContain('Streaming item schema')
+        ->and($snippets)
+        ->toContain('ReadableStream<Uint8Array>')
+        ->toContain('resInfo.streaming');
+});
+
 it('serves configured sections on separate paths with split OpenAPI documents', function () {
     config([
         'documentator.routes.match' => ['api/*', 'app/*'],

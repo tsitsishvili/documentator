@@ -12,6 +12,7 @@ use ReflectionMethod;
 use ReflectionNamedType;
 use Tsitsishvili\Documentator\Attributes\Authenticated;
 use Tsitsishvili\Documentator\Attributes\BodyParam;
+use Tsitsishvili\Documentator\Attributes\Callback;
 use Tsitsishvili\Documentator\Attributes\CookieParam;
 use Tsitsishvili\Documentator\Attributes\Deprecated;
 use Tsitsishvili\Documentator\Attributes\Description;
@@ -28,9 +29,12 @@ use Tsitsishvili\Documentator\Attributes\SchemaName;
 use Tsitsishvili\Documentator\Attributes\Server;
 use Tsitsishvili\Documentator\Attributes\Summary;
 use Tsitsishvili\Documentator\Attributes\TagDescription;
+use Tsitsishvili\Documentator\Attributes\Webhook;
+use Tsitsishvili\Documentator\Data\CallbackData;
 use Tsitsishvili\Documentator\Data\EndpointData;
 use Tsitsishvili\Documentator\Data\ParameterData;
 use Tsitsishvili\Documentator\Data\ResponseData;
+use Tsitsishvili\Documentator\Data\WebhookData;
 use Tsitsishvili\Documentator\Extraction\ExtractionStrategy;
 use Tsitsishvili\Documentator\Extraction\Support\RouteActionReflection;
 use Tsitsishvili\Documentator\OpenApi\PaginationSchema;
@@ -213,12 +217,45 @@ final class ExtractAttributes implements ExtractionStrategy
                 schema: $this->responseSchema($response, $action),
                 collection: $this->paginatedCollection($action),
                 paginationLinks: $response->paginationLinks,
+                mediaType: $response->mediaType ?? ($response->stream ? 'application/x-ndjson' : null),
                 schemaName: $this->schemaName($response->resource),
+                streaming: $response->stream,
             );
 
             if ($response->paginated) {
                 $endpoint->seedQueryParameters(PaginationSchema::queryParameters());
             }
+        }
+
+        foreach ($action->getAttributes(Callback::class) as $attribute) {
+            $callback = $attribute->newInstance();
+            $endpoint->callbacks[$callback->name] = new CallbackData(
+                name: $callback->name,
+                expression: $callback->expression,
+                method: strtolower($callback->method),
+                type: $callback->type,
+                schema: $callback->resource !== null ? $this->schemas->extract($callback->resource) : null,
+                mediaType: $callback->mediaType,
+                responseStatus: $callback->responseStatus,
+                responseDescription: $callback->responseDescription,
+                summary: $callback->summary,
+                description: $callback->description,
+            );
+        }
+
+        foreach ($action->getAttributes(Webhook::class) as $attribute) {
+            $webhook = $attribute->newInstance();
+            $endpoint->webhooks[$webhook->name] = new WebhookData(
+                name: $webhook->name,
+                method: strtolower($webhook->method),
+                type: $webhook->type,
+                schema: $webhook->resource !== null ? $this->schemas->extract($webhook->resource) : null,
+                mediaType: $webhook->mediaType,
+                responseStatus: $webhook->responseStatus,
+                responseDescription: $webhook->responseDescription,
+                summary: $webhook->summary,
+                description: $webhook->description,
+            );
         }
 
         foreach ($action->getAttributes(ResponseHeader::class) as $attribute) {

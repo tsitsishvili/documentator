@@ -9,6 +9,7 @@ use Illuminate\Testing\TestResponse;
 use PHPUnit\Framework\ExpectationFailedException;
 use Symfony\Component\HttpFoundation\Response;
 use Tsitsishvili\Documentator\Attributes\Response as DocumentedResponse;
+use Tsitsishvili\Documentator\Documentator;
 use Tsitsishvili\Documentator\Testing\OpenApiResponseValidator;
 
 class ContractVerificationController
@@ -19,6 +20,15 @@ class ContractVerificationController
         return response()->json([
             'data' => ['id' => 42, 'email' => 'ada@example.com'],
             'tags' => ['customer', 'active'],
+        ]);
+    }
+
+    #[DocumentedResponse(200, type: 'array{data: array{id: int, email: email, token: string}, tags: list<string>}')]
+    public function recordable(): JsonResponse
+    {
+        return response()->json([
+            'data' => ['id' => 42, 'email' => 'ada@example.com', 'token' => 'private-token'],
+            'tags' => ['customer'],
         ]);
     }
 
@@ -62,6 +72,45 @@ it('registers a fluent TestResponse assertion and resolves parameterized paths f
         ->assertOk();
 
     expect($response)->toBeInstanceOf(TestResponse::class);
+});
+
+it('records redacted named response examples from feature tests', function () {
+    $path = sys_get_temp_dir().'/documentator-recorded-examples-'.uniqid().'.json';
+    config(['documentator.examples.path' => $path]);
+
+    Route::get('api/contracts/{contract}', [ContractVerificationController::class, 'recordable']);
+
+    expect(TestResponse::hasMacro('recordAsDocumentationExample'))->toBeTrue();
+
+    $this->getJson('/api/contracts/42')
+        ->recordAsDocumentationExample('customer found', 'A representative customer.')
+        ->assertOk();
+
+    $stored = json_decode((string) file_get_contents($path), true, flags: JSON_THROW_ON_ERROR);
+    $example = $stored['GET /api/contracts/{contract}'][200]['application/json']['customer-found'];
+
+    expect($example['summary'])->toBe('A representative customer.')
+        ->and($example['value']['data']['token'])->toBe('[REDACTED]');
+
+    $media = app(Documentator::class)
+        ->toOpenApi()['paths']['/api/contracts/{contract}']['get']['responses'][200]['content']['application/json'];
+
+    expect($media)->not->toHaveKey('example')
+        ->and($media['examples']['customer-found'])->toBe($example);
+
+    @unlink($path);
+});
+
+it('does not record a response that violates its documented contract', function () {
+    $path = sys_get_temp_dir().'/documentator-invalid-example-'.uniqid().'.json';
+    config(['documentator.examples.path' => $path]);
+
+    Route::get('api/contracts/wrong-shape', [ContractVerificationController::class, 'wrongShape']);
+
+    expect(fn () => $this->getJson('/api/contracts/wrong-shape')->recordAsDocumentationExample())
+        ->toThrow(ExpectationFailedException::class, 'body.data.id: expected integer, got string');
+
+    expect(is_file($path))->toBeFalse();
 });
 
 it('accepts explicit method and URI arguments when a TestResponse has no original request', function () {

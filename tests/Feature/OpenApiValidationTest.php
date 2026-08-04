@@ -34,6 +34,15 @@ it('emits an internally valid OpenAPI 3.2 document', function () {
     expect(OpenApiValidator::validate($spec))->toBe([]);
 });
 
+it('accepts a targeted OpenAPI 3.1 document', function () {
+    Route::post('api/validation-samples', [ValidationSampleController::class, 'store']);
+
+    $spec = app(Documentator::class)->toOpenApi('3.1');
+
+    expect($spec['openapi'])->toBe('3.1.0')
+        ->and(OpenApiValidator::validate($spec))->toBe([]);
+});
+
 it('reports invalid refs and legacy nullable schemas', function () {
     $spec = [
         'openapi' => '3.2.0',

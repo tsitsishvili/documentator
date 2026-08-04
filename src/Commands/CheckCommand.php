@@ -7,8 +7,11 @@ namespace Tsitsishvili\Documentator\Commands;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\File;
 use Illuminate\Support\Str;
+use InvalidArgumentException;
 use Tsitsishvili\Documentator\Data\EndpointData;
 use Tsitsishvili\Documentator\Documentator;
+use Tsitsishvili\Documentator\OpenApi\OpenApiCompatibility;
+use Tsitsishvili\Documentator\OpenApi\OpenApiCompatibilityException;
 use Tsitsishvili\Documentator\OpenApi\OpenApiGenerator;
 use Tsitsishvili\Documentator\OpenApi\OpenApiMethods;
 use Tsitsishvili\Documentator\Support\OpenApiDiff;
@@ -27,12 +30,17 @@ final class CheckCommand extends Command
         {--against= : Path to a committed OpenAPI JSON; fail if the generated spec drifts from it}
         {--fail-on=any : Drift policy: any or breaking}
         {--json : Emit machine-readable JSON for CI dashboards}
-        {--suggest-hidden : Suggest suspicious internal routes that may belong behind #[Hidden] or route excludes}';
+        {--suggest-hidden : Suggest suspicious internal routes that may belong behind #[Hidden] or route excludes}
+        {--openapi= : Target OpenAPI version (3.1 or 3.2)}
+        {--omit-unsupported : Explicitly omit constructs unavailable in the target version}';
 
     protected $description = 'Audit the generated API documentation for gaps and drift';
 
-    public function handle(Documentator $documentator, OpenApiGenerator $generator): int
-    {
+    public function handle(
+        Documentator $documentator,
+        OpenApiGenerator $generator,
+        OpenApiCompatibility $compatibility,
+    ): int {
         if (! in_array($this->failOn(), ['any', 'breaking'], true)) {
             $this->error('--fail-on must be either "any" or "breaking".');
 
@@ -41,6 +49,27 @@ final class CheckCommand extends Command
 
         $endpoints = $documentator->endpoints();
         $spec = $generator->generate($endpoints);
+
+        try {
+            $spec = $compatibility->target(
+                $spec,
+                $this->option('openapi') ?: (string) config('documentator.openapi.version', '3.2'),
+                (bool) $this->option('omit-unsupported'),
+            );
+        } catch (InvalidArgumentException|OpenApiCompatibilityException $exception) {
+            if ($this->option('json')) {
+                $this->line((string) json_encode([
+                    'ok' => false,
+                    'compatibility_errors' => $exception instanceof OpenApiCompatibilityException
+                        ? $exception->issues
+                        : [$exception->getMessage()],
+                ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
+            } else {
+                $this->error($exception->getMessage());
+            }
+
+            return self::FAILURE;
+        }
         $issues = $this->audit($endpoints);
         $health = $this->health($spec);
         $validationErrors = OpenApiValidator::validate($spec);

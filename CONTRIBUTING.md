@@ -53,7 +53,9 @@ RouteCollector → ExtractorPipeline (ordered strategies) → OpenApiGenerator �
 - **`src/OpenApi/`** — `OpenApiGenerator` (pure transform to an OpenAPI 3.2 array),
   `ResourceSchemaExtractor` / `DataObjectSchema` (response schemas), `SchemaSampler`.
 - **`src/Attributes/`** — the override attributes, each read only by `ExtractAttributes`.
-- **`src/Commands/`** — `generate`, `export`, `postman`, `check`.
+- **`src/Commands/`** — `generate`, `export`, `postman`, `typescript`, `check`.
+- **`src/TypeScript/`** — dependency-free TypeScript fetch-client generation.
+- **`src/Testing/`** — runtime response contracts and recorded, redacted examples.
 - **`config/documentator.php`** — all runtime toggles.
 
 `Documentator` (`src/Documentator.php`) is the single entry point that wires the

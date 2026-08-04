@@ -25,5 +25,6 @@ final class ResponseData
         public ?string $mediaType = null,
         public array $headers = [],
         public ?string $schemaName = null,
+        public bool $streaming = false,
     ) {}
 }
