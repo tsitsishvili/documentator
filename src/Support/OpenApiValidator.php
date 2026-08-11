@@ -7,7 +7,7 @@ namespace Tsitsishvili\Documentator\Support;
 use Tsitsishvili\Documentator\OpenApi\OpenApiMethods;
 
 /**
- * Lightweight OpenAPI 3.2 sanity checks for the document this package emits.
+ * Lightweight OpenAPI 3.1/3.2 sanity checks for documents this package emits.
  * This is intentionally narrower than a full spec validator: it catches broken
  * refs and malformed path/operation/schema shapes before CI exports a bad file.
  */
@@ -22,8 +22,8 @@ final class OpenApiValidator
         $errors = [];
         $operationIds = [];
 
-        if (($spec['openapi'] ?? null) !== '3.2.0') {
-            $errors[] = 'openapi must be 3.2.0';
+        if (! in_array($spec['openapi'] ?? null, ['3.1.0', '3.2.0'], true)) {
+            $errors[] = 'openapi must be 3.1.0 or 3.2.0';
         }
 
         if (! is_array($spec['info'] ?? null)) {
@@ -51,6 +51,19 @@ final class OpenApiValidator
             $errors = array_merge($errors, $pathErrors);
         }
 
+        foreach ((array) ($spec['webhooks'] ?? []) as $name => $pathItem) {
+            if (! is_array($pathItem)) {
+                $errors[] = "webhook {$name} path item must be an object";
+
+                continue;
+            }
+
+            $errors = array_merge(
+                $errors,
+                self::validatePathItem($spec, "webhook {$name}", $pathItem, $operationIds, false),
+            );
+        }
+
         return $errors;
     }
 
@@ -59,10 +72,23 @@ final class OpenApiValidator
      * @param  array<string, mixed>  $pathItem
      * @return array<int, string>
      */
-    private static function validatePathItem(array $spec, string $path, array $pathItem, array &$operationIds): array
-    {
+    private static function validatePathItem(
+        array $spec,
+        string $path,
+        array $pathItem,
+        array &$operationIds,
+        bool $validateTemplate = true,
+    ): array {
         $errors = [];
-        $templateParameters = self::pathTemplateParameters($path);
+        $templateParameters = $validateTemplate ? self::pathTemplateParameters($path) : [];
+
+        foreach (array_keys($pathItem) as $field) {
+            if (! in_array($field, OpenApiMethods::ALL, true)
+                && ! in_array($field, ['$ref', 'summary', 'description', 'servers', 'parameters'], true)
+                && ! str_starts_with((string) $field, 'x-')) {
+                $errors[] = "{$path} path item contains unsupported field {$field}";
+            }
+        }
 
         foreach ($pathItem as $verb => $operation) {
             if (! in_array($verb, OpenApiMethods::ALL, true)) {
@@ -106,7 +132,7 @@ final class OpenApiValidator
                     $errors[] = strtoupper((string) $verb)." {$path} path parameter {$parameter['name']} must be required";
                 }
 
-                if (($parameter['in'] ?? null) === 'path' && is_string($parameter['name'] ?? null)) {
+                if ($validateTemplate && ($parameter['in'] ?? null) === 'path' && is_string($parameter['name'] ?? null)) {
                     $definedPathParameters[$parameter['name']] = true;
                 }
 
@@ -135,6 +161,9 @@ final class OpenApiValidator
                 if (is_array($content['schema'] ?? null)) {
                     $errors = array_merge($errors, self::validateSchema($spec, "{$verb} {$path} request {$mediaType}", $content['schema']));
                 }
+                if (is_array($content['itemSchema'] ?? null)) {
+                    $errors = array_merge($errors, self::validateSchema($spec, "{$verb} {$path} request stream item {$mediaType}", $content['itemSchema']));
+                }
             }
 
             foreach ($operation['responses'] ?? [] as $status => $response) {
@@ -142,6 +171,36 @@ final class OpenApiValidator
                     if (is_array($content['schema'] ?? null)) {
                         $errors = array_merge($errors, self::validateSchema($spec, "{$verb} {$path} response {$status} {$mediaType}", $content['schema']));
                     }
+                    if (is_array($content['itemSchema'] ?? null)) {
+                        $errors = array_merge($errors, self::validateSchema($spec, "{$verb} {$path} response {$status} stream item {$mediaType}", $content['itemSchema']));
+                    }
+                }
+            }
+
+            foreach ((array) ($operation['callbacks'] ?? []) as $name => $callback) {
+                if (! is_array($callback)) {
+                    $errors[] = strtoupper((string) $verb)." {$path} callback {$name} must be an object";
+
+                    continue;
+                }
+
+                foreach ($callback as $expression => $callbackPathItem) {
+                    if (! is_array($callbackPathItem)) {
+                        $errors[] = strtoupper((string) $verb)." {$path} callback {$name} expression {$expression} must be a path item";
+
+                        continue;
+                    }
+
+                    $errors = array_merge(
+                        $errors,
+                        self::validatePathItem(
+                            $spec,
+                            "callback {$name} {$expression}",
+                            $callbackPathItem,
+                            $operationIds,
+                            false,
+                        ),
+                    );
                 }
             }
         }

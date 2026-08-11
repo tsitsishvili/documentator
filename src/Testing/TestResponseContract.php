@@ -54,7 +54,7 @@ final class TestResponseContract
         return $response;
     }
 
-    private function content(TestResponse $response): string|false
+    public function content(TestResponse $response): string|false
     {
         if ($response->baseResponse instanceof StreamedResponse
             || $response->baseResponse instanceof BinaryFileResponse) {

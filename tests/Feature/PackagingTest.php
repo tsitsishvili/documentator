@@ -24,6 +24,52 @@ it('exports the OpenAPI document to a file', function () {
     @unlink($path);
 });
 
+it('exports an OpenAPI 3.1 compatibility document for ordinary operations', function () {
+    Route::get('api/ping', fn () => 'pong');
+
+    $path = sys_get_temp_dir().'/documentator-export-31-'.uniqid().'.json';
+
+    $this->artisan('documentator:export', [
+        'path' => $path,
+        '--openapi' => '3.1',
+    ])->assertExitCode(0);
+
+    $spec = json_decode((string) file_get_contents($path), true, flags: JSON_THROW_ON_ERROR);
+
+    expect($spec['openapi'])->toBe('3.1.0')
+        ->and($spec['paths'])->toHaveKey('/api/ping');
+
+    @unlink($path);
+});
+
+it('reports QUERY as incompatible with OpenAPI 3.1 unless omission is explicit', function () {
+    Route::match(['QUERY'], 'api/search', fn () => []);
+
+    $path = sys_get_temp_dir().'/documentator-export-query-'.uniqid().'.json';
+
+    $this->artisan('documentator:export', [
+        'path' => $path,
+        '--openapi' => '3.1',
+    ])
+        ->expectsOutputToContain('uses HTTP QUERY')
+        ->assertExitCode(1);
+
+    expect(is_file($path))->toBeFalse();
+
+    $this->artisan('documentator:export', [
+        'path' => $path,
+        '--openapi' => '3.1',
+        '--omit-unsupported' => true,
+    ])->assertExitCode(0);
+
+    $spec = json_decode((string) file_get_contents($path), true, flags: JSON_THROW_ON_ERROR);
+
+    expect($spec['openapi'])->toBe('3.1.0')
+        ->and($spec['paths'])->not->toHaveKey('/api/search');
+
+    @unlink($path);
+});
+
 it('generates split cached OpenAPI documents for configured sections', function () {
     config([
         'documentator.routes.match' => ['api/*', 'app/*'],

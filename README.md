@@ -18,6 +18,9 @@ descriptions, and try requests live.
 - **Standard output** — a plain OpenAPI 3.2 document other tools can consume,
   with response schemas shared by multiple operations hoisted into
   `components/schemas`, including body-bearing HTTP `QUERY` operations.
+- **Toolchain compatibility** — keep 3.2 for the UI and export a 3.1 projection
+  for downstream tools that have not adopted 3.2 yet. Unsupported `QUERY` or
+  streaming constructs produce an actionable report instead of being rewritten.
 
 Requires PHP 8.2+ and Laravel 12 or 13.
 
@@ -62,6 +65,7 @@ pipeline enriches the endpoint:
 | Route action return type / return statement | success schemas from all readable return branches: Resource `toArray()` fields (including required vs conditional fields and `array_merge(parent::toArray(), …)`), Laravel 13 `JsonApiResource`, collections/paginators, literal JSON payloads, common response helpers, array-returning services, Data objects, or Eloquent models. Distinct shapes sharing a status become `oneOf`. Status follows the verb: POST → **201**, DELETE → **204** |
 | Control flow | possible errors from literal `abort*` calls, controller/Gate authorization, validation, model binding, and recognized Laravel/Symfony HTTP exceptions |
 | Generated examples | a representative `example` for every body/parameter — format- and name-aware (`email`→`user@example.com`, `*_url`, `*_name`, dates, enums, …) so the playground starts filled |
+| Explicit event contracts | operation callbacks, provider-initiated webhooks, and OpenAPI 3.2 streaming item schemas through PHP attributes |
 | PHP attributes | overrides for everything above (runs last) |
 
 ```php
@@ -138,7 +142,8 @@ public function store(StoreOrderRequest $request): OrderResource
 Available attributes: `Summary`, `Description`, `OperationId`, `Group`,
 `Authenticated`, `Hidden`, `Deprecated`, `BodyParam`, `QueryParam`,
 `HeaderParam`, `CookieParam`, `PathParam`, `RequestMediaType`, `Server`,
-`TagDescription`, `Response`, `ResponseHeader`, `SchemaName`.
+`TagDescription`, `Response`, `ResponseHeader`, `Callback`, `Webhook`,
+`SchemaName`.
 `Group`, `Authenticated`, `Hidden` and `Deprecated` may also be placed on the
 controller class to set a default for all its methods (`#[Deprecated]` also
 honours PHP 8.4's native `#[\Deprecated]`). `#[Response(resource: X, paginated: true)]` (or
@@ -148,6 +153,19 @@ Laravel's `links` blocks. `#[Response(type: 'array{id: int}')]` and parameter
 `type` values support a practical PHPDoc subset: scalars, `?T` / `T|null`,
 `list<T>`, `T[]`, `array<string, T>`, and array shapes like
 `array{id: int, name?: string}`.
+
+For a sequential response, set `stream: true`. The response schema becomes the
+schema of each streamed item through OpenAPI 3.2 `itemSchema`; the default media
+type is `application/x-ndjson`, and it can be overridden explicitly:
+
+```php
+#[Response(
+    200,
+    type: 'array{id: int, message: string}',
+    mediaType: 'text/event-stream',
+    stream: true,
+)]
+```
 
 For versioned APIs, keep the group name stable and put the version on the group:
 
@@ -238,6 +256,37 @@ copies the full formatted response body. Shortcuts: `/` focuses search,
 `Cmd/Ctrl+Enter` sends, `Esc` closes panels.
 Cross-origin "try it" calls require the API to allow CORS from the docs origin.
 
+### Event-driven APIs
+
+Use `#[Callback]` when an operation causes the API provider to call a URL
+derived from that operation's request or response. The expression follows
+OpenAPI runtime-expression syntax:
+
+```php
+#[Callback(
+    name: 'deliveryStatus',
+    expression: '{$request.body#/callback_url}',
+    type: 'array{order_id: int, status: string}',
+    responseStatus: 204,
+)]
+public function store(StoreOrderRequest $request): OrderResource
+{
+    // ...
+}
+```
+
+Use `#[Webhook]` for provider-initiated requests independent of one API call.
+The attributed operation acts as the discovery anchor; the webhook is emitted
+under the document's top-level `webhooks` map:
+
+```php
+#[Webhook(
+    name: 'order.created',
+    type: 'array{order_id: int, total: number}',
+    responseStatus: 202,
+)]
+```
+
 ## Organizing larger APIs
 
 For applications with multiple route surfaces, configure sections:
@@ -309,8 +358,15 @@ request, so pre-build it:
 ```bash
 php artisan documentator:generate                  # warm the cache (set DOCUMENTATOR_CACHE=true)
 php artisan documentator:export openapi.json        # write the OpenAPI spec for CI / tooling
+php artisan documentator:export openapi.json --openapi=3.1 # compatibility projection
 php artisan documentator:postman collection.json    # export a Postman v2.1 collection
+php artisan documentator:typescript api-client.ts   # dependency-free typed fetch client
 ```
+
+OpenAPI 3.2 remains the default. A 3.1 export fails when it finds `QUERY` or
+streaming `itemSchema` constructs. Add `--omit-unsupported` only when knowingly
+producing a reduced compatibility document; Documentator never maps `QUERY` to
+`POST`.
 
 ### Keeping docs honest in CI
 
@@ -328,6 +384,7 @@ php artisan documentator:check --json                  # machine-readable CI/das
 php artisan documentator:check --suggest-hidden        # suggest internal/debug routes to hide
 php artisan documentator:check --against=openapi.json  # fail if the spec has drifted; re-export and commit
 php artisan documentator:check --against=openapi.json --fail-on=breaking # allow additive drift
+php artisan documentator:check --openapi=3.1           # audit downstream compatibility
 php artisan documentator:explain GET /api/orders       # show where every inferred fact came from
 ```
 
@@ -366,6 +423,20 @@ This assertion verifies responses only; keep Laravel validation and endpoint
 tests responsible for request behavior. It never calls endpoints on its own, so
 generation cannot trigger writes or external side effects.
 
+To publish a real response as a named documentation example, record the response
+from an existing feature test:
+
+```php
+$this->getJson('/api/orders/42')
+    ->recordAsDocumentationExample('order found', 'A representative order.')
+    ->assertOk();
+```
+
+The response is validated before it is persisted. JSON fields such as
+`password`, `token`, `secret`, and `api_key` are recursively redacted according
+to `examples.redact`, and the resulting named examples are merged into the
+generated OpenAPI document. No endpoint is ever called automatically.
+
 ## Configuration
 
 Key options in `config/documentator.php`:
@@ -374,12 +445,14 @@ Key options in `config/documentator.php`:
 - `routes.match` / `routes.exclude` / `routes.exclude_middleware` — which routes are documented.
 - `route.prefix` / `route.middleware` / `route.domain` — where the UI is served. Lock it down for private APIs.
 - `title` / `version` / `description` / `servers` — OpenAPI `info` and server list.
+- `openapi.version` — native `3.2` (default) or a `3.1` compatibility projection.
 - `security` — auth schemes.
 - `auth_middleware` — middleware aliases/patterns that imply auth schemes.
 - `authenticate` — require a scheme API-wide (`true` = the `default` scheme, or a scheme name); `false` = per-endpoint.
 - `error_responses` — infer conventional 401/403/404/422 responses from the endpoint shape (default `true`).
 - `infer_status_codes` — pick the success status from the verb (POST → 201, DELETE → 204) instead of always 200 (default `true`).
 - `generate_examples` — seed an example for every body/parameter that lacks one (default `true`).
+- `examples.path` / `examples.redact` — recorded feature-test example storage and recursive secret-key redaction.
 - `models_namespace` — where Resources' wrapped models live (for cast-based typing).
 - `grouping.*` — controller/path grouping and split section specs such as `/docs/api/openapi.json`.
 - `global_path_parameters` — reusable metadata for placeholders shared across many routes.

@@ -20,6 +20,22 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | OpenAPI target
+    |--------------------------------------------------------------------------
+    |
+    | OpenAPI 3.2 is Documentator's native format and is required for HTTP
+    | QUERY and streaming item schemas. Select 3.1 when downstream tooling has
+    | not adopted 3.2 yet. Incompatible constructs fail with an actionable
+    | report instead of being silently changed into a different contract.
+    |
+    */
+
+    'openapi' => [
+        'version' => env('DOCUMENTATOR_OPENAPI_VERSION', '3.2'),
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Access
     |--------------------------------------------------------------------------
     |
@@ -216,6 +232,32 @@ return [
     */
 
     'generate_examples' => env('DOCUMENTATOR_EXAMPLES', true),
+
+    /*
+    |--------------------------------------------------------------------------
+    | Recorded response examples
+    |--------------------------------------------------------------------------
+    |
+    | Feature tests can explicitly persist a real, contract-validated response
+    | with recordAsDocumentationExample(). Recorded JSON keys matching this
+    | list are replaced before the example is written to disk.
+    |
+    */
+
+    'examples' => [
+        'path' => storage_path('app/documentator/examples.json'),
+        'redact' => [
+            'password',
+            'password_confirmation',
+            'token',
+            'access_token',
+            'refresh_token',
+            'secret',
+            'api_key',
+            'authorization',
+            'cookie',
+        ],
+    ],
 
     /*
     |--------------------------------------------------------------------------

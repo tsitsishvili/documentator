@@ -9,7 +9,9 @@ use Illuminate\Http\Request;
 use Tsitsishvili\Documentator\Data\EndpointData;
 use Tsitsishvili\Documentator\Extraction\ExtractorPipeline;
 use Tsitsishvili\Documentator\Extraction\RouteCollector;
+use Tsitsishvili\Documentator\OpenApi\OpenApiCompatibility;
 use Tsitsishvili\Documentator\OpenApi\OpenApiGenerator;
+use Tsitsishvili\Documentator\Testing\RecordedExamples;
 
 /**
  * High-level entry point. Collects documentable routes, runs each through the
@@ -30,6 +32,8 @@ final class Documentator
         private readonly RouteCollector $collector,
         private readonly ExtractorPipeline $pipeline,
         private readonly OpenApiGenerator $generator,
+        private readonly OpenApiCompatibility $compatibility,
+        private readonly RecordedExamples $examples,
     ) {}
 
     /**
@@ -74,8 +78,12 @@ final class Documentator
     /**
      * @return array<string, mixed>
      */
-    public function toOpenApi(): array
+    public function toOpenApi(?string $version = null, bool $omitUnsupported = false): array
     {
-        return $this->generator->generate($this->endpoints());
+        $spec = $this->generator->generate($this->endpoints());
+        $spec = $this->examples->apply($spec);
+        $version ??= (string) config('documentator.openapi.version', '3.2');
+
+        return $this->compatibility->target($spec, $version, $omitUnsupported);
     }
 }

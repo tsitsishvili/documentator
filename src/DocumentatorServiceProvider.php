@@ -12,6 +12,7 @@ use Tsitsishvili\Documentator\Commands\ExplainCommand;
 use Tsitsishvili\Documentator\Commands\ExportCommand;
 use Tsitsishvili\Documentator\Commands\GenerateCommand;
 use Tsitsishvili\Documentator\Commands\PostmanCommand;
+use Tsitsishvili\Documentator\Commands\TypeScriptCommand;
 use Tsitsishvili\Documentator\Extraction\ExtractorPipeline;
 use Tsitsishvili\Documentator\Extraction\RouteCollector;
 use Tsitsishvili\Documentator\Extraction\Strategies\ExtractAttributes;
@@ -29,8 +30,11 @@ use Tsitsishvili\Documentator\Http\Controllers\DocsController;
 use Tsitsishvili\Documentator\Http\Controllers\OpenApiController;
 use Tsitsishvili\Documentator\Http\Middleware\Authorize;
 use Tsitsishvili\Documentator\Http\Middleware\EnsureDocsEnabled;
+use Tsitsishvili\Documentator\OpenApi\OpenApiCompatibility;
 use Tsitsishvili\Documentator\OpenApi\OpenApiGenerator;
+use Tsitsishvili\Documentator\Testing\RecordedExamples;
 use Tsitsishvili\Documentator\Testing\TestResponseContract;
+use Tsitsishvili\Documentator\Testing\TestResponseExampleRecorder;
 
 final class DocumentatorServiceProvider extends ServiceProvider
 {
@@ -73,10 +77,13 @@ final class DocumentatorServiceProvider extends ServiceProvider
                 $app->make(RouteCollector::class),
                 $app->make(ExtractorPipeline::class),
                 $app->make(OpenApiGenerator::class),
+                $app->make(OpenApiCompatibility::class),
+                $app->make(RecordedExamples::class),
             );
         });
 
         $this->app->singleton(TestResponseContract::class);
+        $this->app->singleton(TestResponseExampleRecorder::class);
     }
 
     public function boot(): void
@@ -86,7 +93,14 @@ final class DocumentatorServiceProvider extends ServiceProvider
         $this->registerTestResponseMacro();
 
         if ($this->app->runningInConsole()) {
-            $this->commands([GenerateCommand::class, ExportCommand::class, PostmanCommand::class, CheckCommand::class, ExplainCommand::class]);
+            $this->commands([
+                GenerateCommand::class,
+                ExportCommand::class,
+                PostmanCommand::class,
+                TypeScriptCommand::class,
+                CheckCommand::class,
+                ExplainCommand::class,
+            ]);
 
             $this->publishes([
                 __DIR__.'/../config/documentator.php' => $this->app->configPath('documentator.php'),
@@ -138,16 +152,34 @@ final class DocumentatorServiceProvider extends ServiceProvider
 
     private function registerTestResponseMacro(): void
     {
-        if (! class_exists(TestResponse::class) || TestResponse::hasMacro('assertMatchesDocumentation')) {
+        if (! class_exists(TestResponse::class)) {
             return;
         }
 
-        TestResponse::macro(
-            'assertMatchesDocumentation',
-            function (?string $method = null, ?string $uri = null): TestResponse {
-                /** @var TestResponse $this */
-                return app(TestResponseContract::class)->assert($this, $method, $uri);
-            },
-        );
+        if (! TestResponse::hasMacro('assertMatchesDocumentation')) {
+            TestResponse::macro(
+                'assertMatchesDocumentation',
+                function (?string $method = null, ?string $uri = null): TestResponse {
+                    /** @var TestResponse $this */
+                    return app(TestResponseContract::class)->assert($this, $method, $uri);
+                },
+            );
+        }
+
+        if (! TestResponse::hasMacro('recordAsDocumentationExample')) {
+            TestResponse::macro(
+                'recordAsDocumentationExample',
+                function (
+                    string $name = 'default',
+                    ?string $summary = null,
+                    ?string $method = null,
+                    ?string $uri = null,
+                ): TestResponse {
+                    /** @var TestResponse $this */
+                    return app(TestResponseExampleRecorder::class)
+                        ->record($this, $name, $summary, $method, $uri);
+                },
+            );
+        }
     }
 }

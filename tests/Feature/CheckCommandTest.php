@@ -40,6 +40,19 @@ it('passes when every endpoint is well documented', function () {
         ->assertExitCode(0);
 });
 
+it('checks compatibility against a selected OpenAPI target', function () {
+    Route::match(['QUERY'], 'api/checked-search', [CheckedController::class, 'index']);
+
+    $this->artisan('documentator:check', ['--openapi' => '3.1'])
+        ->expectsOutputToContain('uses HTTP QUERY')
+        ->assertExitCode(1);
+
+    $this->artisan('documentator:check', [
+        '--openapi' => '3.1',
+        '--omit-unsupported' => true,
+    ])->assertExitCode(0);
+});
+
 it('passes when a closure route has an inferred success schema', function () {
     Route::get('api/closure', fn (): CheckedResource => new CheckedResource((object) ['id' => 1]));
 

@@ -13,6 +13,7 @@ export function createSnippetController(deps) {
     var copyText = deps.copyText;
     var entryById = deps.entryById;
     var requestBodyContent = deps.requestBodyContent;
+    var responseMedia = deps.responseMedia;
     var responseSchema = deps.responseSchema;
     var resolveSchema = deps.resolveSchema;
     var typesOf = deps.typesOf;
@@ -528,14 +529,15 @@ export function createSnippetController(deps) {
         return 'type ' + name + ' = ' + tsType(schema, 0, requireAll) + ';';
     }
 
-    /* First 2xx response carrying a schema. */
-    function successSchema(op) {
+    /* First 2xx response carrying a complete or streaming item schema. */
+    function successResponse(op) {
         var responses = op.responses || {};
         var codes = Object.keys(responses);
         for (var i = 0; i < codes.length; i++) {
             if (codes[i].charAt(0) === '2') {
                 var s = responseSchema(responses[codes[i]]);
-                if (s) return s;
+                var media = responseMedia(responses[codes[i]]);
+                if (s) return { schema: s, streaming: !!(media && media.itemSchema) };
             }
         }
         return null;
@@ -564,12 +566,19 @@ export function createSnippetController(deps) {
         var reqType = base + 'Request';
         if (hasBody) blocks.push(tsDeclaration(reqType, content.schema, false));
 
-        var resSchema = successSchema(op);
+        var resInfo = successResponse(op);
+        var resSchema = resInfo && resInfo.schema;
+        var streaming = !!(resInfo && resInfo.streaming);
         var resType = base + 'Response';
-        if (resSchema) blocks.push(tsDeclaration(resType, resSchema, true));
+        if (resSchema && streaming) {
+            blocks.push(tsDeclaration(resType + 'Item', resSchema, true));
+            blocks.push('type ' + resType + ' = ReadableStream<Uint8Array>;');
+        } else if (resSchema) {
+            blocks.push(tsDeclaration(resType, resSchema, true));
+        }
 
         // Hydrate dates only when the response actually carries one.
-        var hydrate = resSchema && schemaHasDate(resSchema);
+        var hydrate = resSchema && !streaming && schemaHasDate(resSchema);
 
         var headers = {};
         Object.keys(req.headers).forEach(function (k) { headers[k] = req.headers[k]; });
@@ -599,7 +608,10 @@ export function createSnippetController(deps) {
         lines.push('  });');
         lines.push('');
         lines.push('  if (!response.ok) throw new Error(`HTTP ${response.status} ${response.statusText}`);');
-        if (resSchema && hydrate) {
+        if (streaming) {
+            lines.push('  if (!response.body) throw new Error("Streaming response did not provide a body");');
+            lines.push('  return response.body;');
+        } else if (resSchema && hydrate) {
             lines.push('');
             lines = lines.concat(hydrationLines(resSchema, resType));
         } else if (resSchema) {

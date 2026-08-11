@@ -84,7 +84,7 @@ Opening `http://localhost:8123/` returns 404 because the package root does not h
 | Section dropdown behavior             | `resources/ui/core.js`, `sectionFilterHtml` and `wireShell`                                          |
 | Endpoint docs page                    | `resources/ui/core.js`, `renderDoc`, `rowsFromSchema`, `schemaSection`                               |
 | Parameter/schema table rows           | `resources/ui/core.js`, `rowsFromSchema`                                                             |
-| Response examples and headers         | `resources/ui/core.js`, `responseExample`, `responseHeadersHtml`, `exampleBlock`                     |
+| Response examples, stream items, headers | `resources/ui/core.js`, `responseMedia`, `responseSchema`, `responseExample`, `responseHeadersHtml` |
 | Request console fields                | `resources/ui/core.js`, `renderConsole`, `parameterFieldControl`, `bodyFieldControl`                 |
 | Global path parameter behavior        | `resources/ui/core.js`, `globalPathParameter`, `globalPathInputValue`, `globalPathFieldControl`      |
 | Reading request form data             | `resources/ui/core.js`, `readForm`, `readBody`, `coerce`                                             |
@@ -141,7 +141,7 @@ Important state transitions:
 |----------------------------------------------|-----------------------------------------------------------------------------------------|
 | Formatting helpers                           | Shared string escaping, indentation, PHP/Python literals, Java text blocks.             |
 | `buildCurl`, `buildLaravel`, `buildJs`, etc. | One generator per language. Each receives the normalized request object from `core.js`. |
-| `TypeScript types`                           | Converts OpenAPI schemas into TypeScript declarations and response date hydration code. |
+| `TypeScript types`                           | Converts OpenAPI schemas into TypeScript declarations, stream types, and response date hydration code. |
 | `GENERATORS`                                 | Registry mapping language keys to labels and builder functions.                         |
 | `PRIMARY_LANGS` and `OTHER_LANGS`            | Controls which languages are tabs and which live in the dropdown.                       |
 | `html`                                       | Returns the snippet toolbar and code block markup.                                      |

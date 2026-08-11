@@ -21,8 +21,9 @@ Runtime flow:
 4. The strategies fill `EndpointData`, `ParameterData`, and `ResponseData`.
 5. `src/OpenApi/OpenApiGenerator.php` converts endpoint data into an OpenAPI
    3.2 array.
-6. HTTP controllers, Artisan commands, the Postman generator, and feature-test
-   contract assertions consume the OpenAPI array.
+6. Compatibility targeting and recorded examples can project/enrich the array.
+7. HTTP controllers, Artisan commands, Postman/TypeScript generators, and
+   feature-test contract assertions consume it.
 
 ## Main Entry Points
 
@@ -41,6 +42,7 @@ Runtime flow:
 | Create endpoint accumulator | `src/Data/EndpointData.php`                  | Mutable object that all strategies enrich. It also creates default operation IDs.                                     |
 | Run strategies              | `src/Extraction/ExtractorPipeline.php`       | Reflects the route action, invokes each strategy in order, and records per-facet provenance for `documentator:explain`. |
 | Convert to OpenAPI          | `src/OpenApi/OpenApiGenerator.php`           | Builds `info`, `servers`, `tags`, `paths`, parameters, request bodies, responses, security, examples, and components. |
+| Target compatibility       | `src/OpenApi/OpenApiCompatibility.php`       | Keeps native OpenAPI 3.2 or projects to 3.1 with explicit incompatibility reporting.                                   |
 | Serve OpenAPI               | `src/Http/Controllers/OpenApiController.php` | Returns generated JSON, cached JSON, or a section-filtered spec.                                                      |
 | Serve docs UI               | `src/Http/Controllers/DocsController.php`    | Chooses built-in UI vs Scalar and passes spec/asset URLs to the Blade view.                                           |
 
@@ -76,9 +78,10 @@ override inferred values.
 
 | File                         | Represents                                                                                                                          |
 |------------------------------|-------------------------------------------------------------------------------------------------------------------------------------|
-| `src/Data/EndpointData.php`  | One documented endpoint: route metadata, grouped params, request body, responses, auth, servers, grouping, visibility, and internal provenance trace. |
+| `src/Data/EndpointData.php`  | One documented endpoint: route metadata, grouped params, request body, responses, callbacks, webhooks, auth, grouping, and provenance. |
 | `src/Data/ParameterData.php` | One path/query/header/cookie/body parameter. `schema` wins over scalar `type` when present.                                         |
 | `src/Data/ResponseData.php`  | One response status, including description, example, resource/type/schema, media type, headers, and reusable schema name.           |
+| `src/Data/CallbackData.php` / `WebhookData.php` | Explicit out-of-band request contracts.                                                                    |
 
 These are mutable on purpose: every extraction strategy receives and returns the
 same endpoint accumulator.
@@ -93,7 +96,7 @@ Attribute classes live in `src/Attributes`.
 | Grouping and visibility | `Group`, `TagDescription`, `Hidden`, `Deprecated`                                        |
 | Auth and servers        | `Authenticated`, `Server`                                                                |
 | Request docs            | `PathParam`, `QueryParam`, `HeaderParam`, `CookieParam`, `BodyParam`, `RequestMediaType` |
-| Response docs           | `Response`, `ResponseHeader`, `SchemaName`                                               |
+| Response/event docs     | `Response`, `ResponseHeader`, `Callback`, `Webhook`, `SchemaName`                        |
 | Resource inference      | `UsesModel`                                                                              |
 
 The attribute reader is `src/Extraction/Strategies/ExtractAttributes.php`.
@@ -105,6 +108,8 @@ resource schemas are built.
 | File                                      | What Happens There                                                                                                                                                                     |
 |-------------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `src/OpenApi/OpenApiGenerator.php`        | Turns endpoint data into OpenAPI 3.2. Look here for parameter rendering, request bodies, response content, security, tags, sections, components, examples, and extension transformers. |
+| `src/OpenApi/OpenApiCompatibility.php`    | Targets 3.2/3.1 and reports or explicitly omits constructs unavailable in 3.1.                                                                      |
+| `src/OpenApi/OpenApiOperationMatcher.php` | Resolves concrete request URIs to documented path templates for contracts and example recording.                                                     |
 | `src/OpenApi/OpenApiSections.php`         | Builds configured documentation sections and filters a full spec into per-section specs.                                                                                               |
 | `src/OpenApi/ResourceSchemaExtractor.php` | Parses Laravel API Resource `toArray()` methods and Eloquent model docblocks/casts into response schemas. Handles JSON:API resources too.                                              |
 | `src/OpenApi/DataObjectSchema.php`        | Builds request/response schemas for `spatie/laravel-data` objects.                                                                                                                     |
@@ -140,6 +145,7 @@ Commands are registered in `src/DocumentatorServiceProvider.php`.
 | `documentator:generate` | `src/Commands/GenerateCommand.php` | Generates and caches OpenAPI JSON, including section-specific cache files.                                                    |
 | `documentator:export`   | `src/Commands/ExportCommand.php`   | Writes the generated OpenAPI document to a chosen JSON path.                                                                  |
 | `documentator:postman`  | `src/Commands/PostmanCommand.php`  | Writes a Postman Collection generated from OpenAPI.                                                                           |
+| `documentator:typescript` | `src/Commands/TypeScriptCommand.php` | Writes a dependency-free typed TypeScript `fetch` client.                                                                  |
 | `documentator:check`    | `src/Commands/CheckCommand.php`    | Audits docs quality, validates the emitted OpenAPI shape, suggests hidden routes, and detects drift against a committed spec. |
 | `documentator:explain`  | `src/Commands/ExplainCommand.php`  | Shows which extraction strategies inferred or overrode every documented facet for one operation.                       |
 
@@ -158,6 +164,9 @@ Commands are registered in `src/DocumentatorServiceProvider.php`.
 | `src/Testing/TestResponseContract.php`         | Connects Laravel's `TestResponse` to the generated document and raises PHPUnit assertion failures.                    |
 | `src/Testing/OpenApiResponseValidator.php`     | Matches the request path/method and validates response status, media type, JSON decoding, and the selected schema.     |
 | `src/Testing/JsonSchemaValidator.php`          | Validates runtime values against Documentator's emitted JSON Schema vocabulary, including refs and composites.        |
+| `src/Testing/RecordedExamples.php`             | Redacts and persists explicit feature-test examples, then overlays them onto generated response media.                |
+| `src/Testing/TestResponseExampleRecorder.php`  | Implements the `recordAsDocumentationExample()` feature-test macro.                                                   |
+| `src/TypeScript/TypeScriptClientGenerator.php` | Generates request/response types and a dependency-free `fetch` client.                                                |
 | `src/DocumentatorServiceProvider.php`          | Registers the `assertMatchesDocumentation()` `TestResponse` macro and its cached per-test-container contract service. |
 
 ## Common Fragment Finder

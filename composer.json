@@ -9,13 +9,16 @@
         "api-documentation",
         "documentation",
         "openapi",
+        "openapi31",
         "openapi32",
         "swagger",
         "scalar",
         "postman",
         "php-attributes",
         "laravel-package",
-        "rest-api"
+        "rest-api",
+        "typescript",
+        "webhooks"
     ],
     "license": "MIT",
     "authors": [

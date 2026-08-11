@@ -9,23 +9,24 @@ use Illuminate\Support\Facades\File;
 use InvalidArgumentException;
 use Tsitsishvili\Documentator\Documentator;
 use Tsitsishvili\Documentator\OpenApi\OpenApiCompatibilityException;
+use Tsitsishvili\Documentator\TypeScript\TypeScriptClientGenerator;
 
 /**
- * Writes the OpenAPI document to a file for external tooling — CI drift checks,
- * Postman/Insomnia import, client generation, etc.
+ * Writes a dependency-free TypeScript fetch client from the generated contract.
  */
-final class ExportCommand extends Command
+final class TypeScriptCommand extends Command
 {
-    protected $signature = 'documentator:export
-        {path? : Output path (defaults to openapi.json in the project root)}
+    protected $signature = 'documentator:typescript
+        {path? : Output path (defaults to documentator-client.ts)}
+        {--name=DocumentatorClient : Generated client class name}
         {--openapi= : Target OpenAPI version (3.1 or 3.2)}
         {--omit-unsupported : Explicitly omit constructs unavailable in the target version}';
 
-    protected $description = 'Export the OpenAPI document to a JSON file';
+    protected $description = 'Generate a dependency-free TypeScript fetch client';
 
-    public function handle(Documentator $documentator): int
+    public function handle(Documentator $documentator, TypeScriptClientGenerator $typescript): int
     {
-        $path = $this->argument('path') ?: base_path('openapi.json');
+        $path = $this->argument('path') ?: base_path('documentator-client.ts');
 
         try {
             $spec = $documentator->toOpenApi(
@@ -39,9 +40,8 @@ final class ExportCommand extends Command
         }
 
         File::ensureDirectoryExists(dirname($path));
-        File::put($path, json_encode($spec, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE));
-
-        $this->info("Exported OpenAPI document to {$path}");
+        File::put($path, $typescript->generate($spec, (string) $this->option('name')));
+        $this->info("Generated TypeScript client at {$path}");
 
         return self::SUCCESS;
     }

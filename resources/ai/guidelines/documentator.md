@@ -63,7 +63,8 @@ public function search(SearchOrdersRequest $request): OrderCollection
 Useful attributes from `Tsitsishvili\Documentator\Attributes` include
 `Summary`, `Description`, `Group`, `OperationId`, `PathParam`, `QueryParam`,
 `HeaderParam`, `CookieParam`, `BodyParam`, `RequestMediaType`, `Response`,
-`ResponseHeader`, `Authenticated`, `Server`, `Hidden`, and `Deprecated`.
+`ResponseHeader`, `Callback`, `Webhook`, `Authenticated`, `Server`, `Hidden`,
+and `Deprecated`. Use `Response(stream: true)` for a sequential item contract.
 
 ## Verification and diagnosis
 
@@ -72,11 +73,15 @@ php artisan documentator:explain QUERY /api/orders/search
 php artisan documentator:check
 php artisan documentator:check --against=openapi.json --fail-on=breaking
 php artisan documentator:export openapi.json
+php artisan documentator:export openapi.json --openapi=3.1
+php artisan documentator:typescript api-client.ts
 ```
 
 In Laravel feature tests for changed endpoints, chain
 `->assertMatchesDocumentation()` onto the `TestResponse` to verify its real
 status, media type, and body against the generated operation.
+Use `->recordAsDocumentationExample()` only to publish an existing, validated
+feature-test response; it never authorizes automatic endpoint calls.
 
 `documentator:check` audits action introspectability and success schemas, reports
 documentation-health warnings, runs Documentator's OpenAPI checks, and can

@@ -8,6 +8,7 @@ use Illuminate\Support\Str;
 use Tsitsishvili\Documentator\Data\EndpointData;
 use Tsitsishvili\Documentator\Data\ParameterData;
 use Tsitsishvili\Documentator\Data\ResponseData;
+use Tsitsishvili\Documentator\Data\WebhookData;
 use Tsitsishvili\Documentator\Extraction\Support\RuleParser;
 
 /**
@@ -40,6 +41,7 @@ final class OpenApiGenerator
         $this->operationIds = [];
 
         $paths = [];
+        $webhooks = [];
         $tags = [];
         $globalScheme = $this->defaultSecurityScheme();
 
@@ -54,6 +56,10 @@ final class OpenApiGenerator
 
             foreach ($endpoint->verbs() as $verb) {
                 $paths[$path][$verb] = $this->operation($endpoint, $tag, $globalScheme);
+            }
+
+            foreach ($endpoint->webhooks as $webhook) {
+                $webhooks[$webhook->name] = $this->webhook($webhook);
             }
         }
 
@@ -74,6 +80,7 @@ final class OpenApiGenerator
             'tags' => array_values($tags),
             'x-documentator-global-path-parameters' => $this->globalPathParameters(),
             'paths' => $paths,
+            'webhooks' => $webhooks,
             'components' => $components,
         ]);
 
@@ -145,6 +152,7 @@ final class OpenApiGenerator
             'parameters' => $this->parameters($endpoint),
             'requestBody' => $this->requestBody($endpoint),
             'responses' => $this->responses($endpoint),
+            'callbacks' => $this->callbacks($endpoint),
             'servers' => $endpoint->servers,
             'deprecated' => $endpoint->deprecated ?: null,
             'x-documentator-section' => $this->sectionFor($endpoint),
@@ -165,7 +173,11 @@ final class OpenApiGenerator
 
     private function operationId(EndpointData $endpoint): string
     {
-        $base = $endpoint->operationId();
+        return $this->uniqueOperationId($endpoint->operationId());
+    }
+
+    private function uniqueOperationId(string $base): string
+    {
         $count = $this->operationIds[$base] ?? 0;
         $this->operationIds[$base] = $count + 1;
 
@@ -341,12 +353,14 @@ final class OpenApiGenerator
         $mediaType = $response->mediaType ?? 'application/json';
         $content = [];
 
+        $schemaField = $response->streaming ? 'itemSchema' : 'schema';
+
         if ($response->schema !== null) {
-            $content['schema'] = $this->responseSchema($response);
+            $content[$schemaField] = $this->responseSchema($response);
         } elseif ($response->type !== null && ($typeSchema = TypeStringParser::parse($response->type)) !== null) {
-            $content['schema'] = $this->normalizeSchema($typeSchema);
+            $content[$schemaField] = $this->normalizeSchema($typeSchema);
         } elseif ($response->resource !== null) {
-            $content['schema'] = ['type' => 'object'];
+            $content[$schemaField] = ['type' => 'object'];
         }
 
         if ($response->example !== null) {
@@ -370,6 +384,94 @@ final class OpenApiGenerator
         }
 
         return $body;
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function callbacks(EndpointData $endpoint): array
+    {
+        $callbacks = [];
+
+        foreach ($endpoint->callbacks as $callback) {
+            $callbacks[$callback->name] = [
+                $callback->expression => [
+                    $callback->method => $this->outOfBandOperation(
+                        operationId: 'callback_'.$callback->name,
+                        type: $callback->type,
+                        schema: $callback->schema,
+                        mediaType: $callback->mediaType,
+                        responseStatus: $callback->responseStatus,
+                        responseDescription: $callback->responseDescription,
+                        summary: $callback->summary,
+                        description: $callback->description,
+                    ),
+                ],
+            ];
+        }
+
+        return $callbacks;
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function webhook(WebhookData $webhook): array
+    {
+        return [
+            $webhook->method => $this->outOfBandOperation(
+                operationId: 'webhook_'.$webhook->name,
+                type: $webhook->type,
+                schema: $webhook->schema,
+                mediaType: $webhook->mediaType,
+                responseStatus: $webhook->responseStatus,
+                responseDescription: $webhook->responseDescription,
+                summary: $webhook->summary,
+                description: $webhook->description,
+            ),
+        ];
+    }
+
+    /**
+     * @param  array<string, mixed>|null  $schema
+     * @return array<string, mixed>
+     */
+    private function outOfBandOperation(
+        string $operationId,
+        ?string $type,
+        ?array $schema,
+        string $mediaType,
+        int $responseStatus,
+        string $responseDescription,
+        ?string $summary,
+        ?string $description,
+    ): array {
+        $payload = $schema;
+
+        if ($payload === null && $type !== null) {
+            $payload = TypeStringParser::parse($type);
+        }
+
+        return array_filter([
+            'operationId' => $this->uniqueOperationId(
+                Str::camel((string) preg_replace('/[^A-Za-z0-9]+/', '_', $operationId)),
+            ),
+            'summary' => $summary,
+            'description' => $description,
+            'requestBody' => $payload !== null ? [
+                'required' => true,
+                'content' => [
+                    $mediaType => [
+                        'schema' => $this->normalizeSchema($payload),
+                    ],
+                ],
+            ] : null,
+            'responses' => [
+                (string) $responseStatus => [
+                    'description' => $responseDescription,
+                ],
+            ],
+        ], fn (mixed $value): bool => $value !== null);
     }
 
     /**

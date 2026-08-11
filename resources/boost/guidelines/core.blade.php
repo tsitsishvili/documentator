@@ -15,10 +15,13 @@ When changing an API endpoint:
   content and becomes the OpenAPI 3.2 `query.requestBody`.
 - Do not confuse HTTP `QUERY` request content with URI query parameters.
 - Add `Tsitsishvili\Documentator\Attributes` only for gaps or intentional overrides.
+- Use explicit `Callback` / `Webhook` attributes and `Response(stream: true)`
+  for out-of-band or sequential contracts; do not infer those semantics.
 - Verify with `php artisan documentator:explain METHOD /uri` and
   `php artisan documentator:check`.
 - In feature tests, use `->assertMatchesDocumentation()` on changed endpoint
-  responses.
+  responses, and `->recordAsDocumentationExample()` only when a real,
+  contract-validated example should be published.
 
 Use the **`documentator-api-docs`** skill for the full workflow, inference map,
 attribute guidance, troubleshooting, contract checks, and examples.
