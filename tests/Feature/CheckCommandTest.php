@@ -3,6 +3,7 @@
 declare(strict_types=1);
 
 use Illuminate\Http\Resources\Json\JsonResource;
+use Illuminate\Http\Response;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Route;
 
@@ -29,6 +30,11 @@ class CheckedController
     public function raw(): void
     {
         //
+    }
+
+    public function destroy(): Response
+    {
+        return response()->noContent();
     }
 }
 
@@ -58,6 +64,21 @@ it('passes when a closure route has an inferred success schema', function () {
 
     $this->artisan('documentator:check')
         ->expectsOutputToContain('No documentation issues found.')
+        ->assertExitCode(0);
+});
+
+it('accepts a bodyless 204 success response without requiring a schema', function () {
+    Route::delete('api/checked', [CheckedController::class, 'destroy']);
+
+    $this->artisan('documentator:check', ['--strict' => true])
+        ->expectsOutputToContain('No documentation issues found.')
+        ->assertExitCode(0);
+
+    $this->artisan('documentator:explain', [
+        'method' => 'DELETE',
+        'uri' => '/api/checked',
+    ])
+        ->doesntExpectOutputToContain('No success response schema was inferred')
         ->assertExitCode(0);
 });
 
