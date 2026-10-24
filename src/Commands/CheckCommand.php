@@ -156,7 +156,10 @@ final class CheckCommand extends Command
     {
         foreach ($endpoint->responses as $response) {
             if ($response->status >= 200 && $response->status < 300
-                && ($response->schema !== null || $response->example !== null || $response->resource !== null)) {
+                && ($response->status === 204
+                    || $response->schema !== null
+                    || $response->example !== null
+                    || $response->resource !== null)) {
                 return true;
             }
         }

@@ -99,7 +99,10 @@ final class ExplainCommand extends Command
 
         foreach ($endpoint->responses as $response) {
             if ($response->status >= 200 && $response->status < 300
-                && ($response->schema !== null || $response->resource !== null || $response->example !== null)) {
+                && ($response->status === 204
+                    || $response->schema !== null
+                    || $response->resource !== null
+                    || $response->example !== null)) {
                 $hasSuccessSchema = true;
                 break;
             }
