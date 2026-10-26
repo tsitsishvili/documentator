@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Untyped Resource responses.** Actions without a return type are documented
+  from their return statement: `new XResource(...)`, `XResource::make(...)`,
+  and Eloquent `toResource()` / `toResourceCollection()` calls resolved through
+  `#[UseResource]`, `#[UseResourceCollection]`, or Laravel's resource naming
+  convention. Collections are paginated only when the query chain paginates.
+- **403 from authorization middleware.** `can:` middleware, `->can()`, Laravel
+  13 `#[Authorize]` controller attributes, Sanctum `abilities`/`ability`, and
+  Passport `scopes`/`scope` now contribute a `403 Forbidden` response.
+
+### Fixed
+
+- **Hidden model fields in returned-model schemas.** Eloquent models returned
+  directly are documented as serialized: `$hidden` fields are dropped,
+  `$visible` limits the properties, and `$appends` accessors are added with
+  their declared return types. Laravel 13 `#[Hidden]`, `#[Visible]`, and
+  `#[Appends]` attributes are honoured.
+
+## [2.2.1] - 2026-10-24
+
+### Fixed
+
+- **204 responses count as documented successes.** `documentator:check` and
+  `documentator:explain` no longer flag an endpoint whose only success response
+  is `204 No Content` as missing a success schema.
+
 ## [2.2.0] - 2026-08-11
 
 ### Added

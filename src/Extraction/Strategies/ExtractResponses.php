@@ -4,11 +4,14 @@ declare(strict_types=1);
 
 namespace Tsitsishvili\Documentator\Extraction\Strategies;
 
+use Illuminate\Database\Eloquent\Attributes\UseResource;
+use Illuminate\Database\Eloquent\Attributes\UseResourceCollection;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 use Illuminate\Http\Resources\Json\JsonResource;
 use Illuminate\Http\Resources\Json\ResourceCollection;
 use Illuminate\Routing\Route;
+use Illuminate\Support\Arr;
 use PhpParser\Node;
 use PhpParser\NodeFinder;
 use ReflectionClass;
@@ -80,14 +83,15 @@ final class ExtractResponses implements ExtractionStrategy
         }
 
         $returnType = $action->getReturnType();
+        $class = $returnType instanceof ReflectionNamedType && ! $returnType->isBuiltin() ? $returnType->getName() : null;
+        $paginated = true;
 
-        if (! $returnType instanceof ReflectionNamedType || $returnType->isBuiltin()) {
-            return $endpoint;
+        // Untyped or base-typed actions name their resource only in the return statement.
+        if (in_array($class, [null, JsonResource::class, ResourceCollection::class], true)) {
+            [$class, $paginated] = $this->returnedResource($action) ?? [$class, true];
         }
 
-        $class = $returnType->getName();
-
-        if ($class === AnonymousResourceCollection::class) {
+        if ($class === null || $class === AnonymousResourceCollection::class) {
             return $endpoint;
         }
 
@@ -96,12 +100,16 @@ final class ExtractResponses implements ExtractionStrategy
                 status: $status,
                 description: $this->describe($status),
                 resource: $class,
-                schema: PaginationSchema::paginated($this->collectsSchema($class), $class),
+                schema: $paginated
+                    ? PaginationSchema::paginated($this->collectsSchema($class), $class)
+                    : PaginationSchema::collection($this->collectsSchema($class)),
                 collection: $class,
                 schemaName: $this->schemaName($class),
             );
 
-            $endpoint->seedQueryParameters(PaginationSchema::queryParameters());
+            if ($paginated) {
+                $endpoint->seedQueryParameters(PaginationSchema::queryParameters());
+            }
         } elseif (is_subclass_of($class, JsonResource::class)) {
             $jsonApi = $this->schemas->isJsonApiResource($class);
             $endpoint->responses[$status] ??= new ResponseData(
@@ -144,27 +152,202 @@ final class ExtractResponses implements ExtractionStrategy
     {
         $return = $this->returnExpression($action);
 
-        if (! $return instanceof Node\Expr\StaticCall
-            || ! $return->class instanceof Node\Name
-            || ! $return->name instanceof Node\Identifier
-            || $return->name->toString() !== 'collection') {
+        [$resource, $source] = match (true) {
+            $return instanceof Node\Expr\StaticCall && $return->class instanceof Node\Name && $this->isCall($return, 'collection') => [$return->class->toString(), $return->args[0]->value ?? null],
+            $return instanceof Node\Expr\MethodCall && $this->isCall($return, 'toResourceCollection') => [$this->collectionTarget($return, $action, 'resource'), $return->var],
+            default => [null, null],
+        };
+
+        if (! is_string($resource) || ! is_subclass_of($resource, JsonResource::class)) {
             return null;
         }
 
-        $resource = $return->class->toString();
-
-        if (! is_subclass_of($resource, JsonResource::class)) {
-            return null;
-        }
-
-        $jsonApiPaginated = isset($return->args[0]) && $this->containsJsonApiPaginatorCall($return->args[0]->value);
-        $paginated = $jsonApiPaginated || (isset($return->args[0]) && $this->containsPaginatorCall($return->args[0]->value));
+        $jsonApiPaginated = $source instanceof Node\Expr && $this->containsJsonApiPaginatorCall($source);
+        $paginated = $jsonApiPaginated || ($source instanceof Node\Expr && $this->containsPaginatorCall($source));
 
         return [
             'resource' => $resource,
             'paginated' => $paginated,
             'jsonApiPaginated' => $jsonApiPaginated,
         ];
+    }
+
+    /**
+     * The Resource or ResourceCollection class an untyped return statement
+     * builds — `new X(...)`, `X::make(...)`, `$model->toResource()` or a
+     * `toResourceCollection()` that resolves to a collection class — and whether
+     * the returned value is paginated.
+     *
+     * @return array{0: class-string, 1: bool}|null
+     */
+    private function returnedResource(ReflectionFunctionAbstract $action): ?array
+    {
+        $return = $this->returnExpression($action);
+
+        $class = match (true) {
+            $return instanceof Node\Expr\New_ && $return->class instanceof Node\Name => $return->class->toString(),
+            $return instanceof Node\Expr\StaticCall && $return->class instanceof Node\Name && $this->isCall($return, 'make') => $return->class->toString(),
+            $return instanceof Node\Expr\MethodCall && $this->isCall($return, 'toResource') => $this->classArgument($return)
+                ?? $this->modelResource($this->receiverModel($return->var, $action)),
+            $return instanceof Node\Expr\MethodCall && $this->isCall($return, 'toResourceCollection') => $this->collectionTarget($return, $action, 'collection'),
+            default => null,
+        };
+
+        return $return instanceof Node\Expr && is_string($class) && is_subclass_of($class, JsonResource::class)
+            ? [$class, $this->containsPaginatorCall($return)]
+            : null;
+    }
+
+    /**
+     * The class a `toResourceCollection()` call resolves to when it is of the
+     * given kind: a ResourceCollection ('collection') or a Resource collected
+     * one by one ('resource'). An explicit class argument is always a Resource.
+     *
+     * @param  'collection'|'resource'  $kind
+     */
+    private function collectionTarget(Node\Expr\MethodCall $call, ReflectionFunctionAbstract $action, string $kind): ?string
+    {
+        $target = ($class = $this->classArgument($call)) !== null
+            ? ['resource', $class]
+            : $this->modelCollection($this->receiverModel($call->var, $action));
+
+        return $target !== null && $target[0] === $kind ? $target[1] : null;
+    }
+
+    private function isCall(Node\Expr\StaticCall|Node\Expr\MethodCall $call, string $name): bool
+    {
+        return $call->name instanceof Node\Identifier && $call->name->toString() === $name;
+    }
+
+    private function classArgument(Node\Expr\MethodCall $call): ?string
+    {
+        $value = $call->args[0]->value ?? null;
+
+        return $value instanceof Node\Expr\ClassConstFetch && $value->class instanceof Node\Name
+            ? $value->class->toString()
+            : null;
+    }
+
+    /**
+     * The Eloquent model a call chain starts from: a typed action parameter
+     * (`$order->...`) or a static model call (`Order::query()->...`).
+     */
+    private function receiverModel(Node\Expr $expr, ReflectionFunctionAbstract $action): ?string
+    {
+        $calls = [];
+
+        while ($expr instanceof Node\Expr\MethodCall) {
+            $calls[] = $expr->name instanceof Node\Identifier ? $expr->name->toString() : null;
+            $expr = $expr->var;
+        }
+
+        $model = match (true) {
+            $expr instanceof Node\Expr\StaticCall && $expr->class instanceof Node\Name => $expr->class->toString(),
+            $expr instanceof Node\Expr\Variable && is_string($expr->name) => $this->parameterClass($action, $expr->name),
+            default => null,
+        };
+
+        if ($model === null || ! is_subclass_of($model, Model::class)) {
+            return null;
+        }
+
+        foreach ($calls as $call) {
+            // A method the app's model declares (typically a relationship) changes which model is returned.
+            if ($call === null || (method_exists($model, $call)
+                && ! str_starts_with((new ReflectionMethod($model, $call))->getDeclaringClass()->getName(), 'Illuminate\\'))) {
+                return null;
+            }
+        }
+
+        return $model;
+    }
+
+    private function parameterClass(ReflectionFunctionAbstract $action, string $name): ?string
+    {
+        foreach ($action->getParameters() as $parameter) {
+            $type = $parameter->getType();
+
+            if ($parameter->getName() === $name && $type instanceof ReflectionNamedType && ! $type->isBuiltin()) {
+                return $type->getName();
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * The resource `$model->toResource()` resolves to, in Laravel's order:
+     * #[UseResource], then the guessed App\Http\Resources name.
+     */
+    private function modelResource(?string $model): ?string
+    {
+        if ($model === null) {
+            return null;
+        }
+
+        return $this->attributeClass($model, UseResource::class)
+            ?? Arr::first($this->guessedResources($model), fn (string $resource) => class_exists($resource));
+    }
+
+    /**
+     * What `toResourceCollection()` resolves to, in Laravel's order:
+     * #[UseResourceCollection], #[UseResource], a guessed {Resource}Collection,
+     * then a guessed {Resource} collected one by one.
+     *
+     * @return array{0: 'collection'|'resource', 1: class-string}|null
+     */
+    private function modelCollection(?string $model): ?array
+    {
+        if ($model === null) {
+            return null;
+        }
+
+        if (($class = $this->attributeClass($model, UseResourceCollection::class)) !== null) {
+            return ['collection', $class];
+        }
+
+        if (($class = $this->attributeClass($model, UseResource::class)) !== null) {
+            return ['resource', $class];
+        }
+
+        $guessed = $this->guessedResources($model);
+
+        foreach ($guessed as $resource) {
+            if (class_exists($resource.'Collection')) {
+                return ['collection', $resource.'Collection'];
+            }
+        }
+
+        foreach ($guessed as $resource) {
+            if (class_exists($resource)) {
+                return ['resource', $resource];
+            }
+        }
+
+        return null;
+    }
+
+    private function attributeClass(string $model, string $attribute): ?string
+    {
+        try {
+            $class = ((new ReflectionClass($model))->getAttributes($attribute)[0] ?? null)?->newInstance()->class;
+        } catch (Throwable) {
+            return null;
+        }
+
+        return is_string($class) && class_exists($class) ? $class : null;
+    }
+
+    /**
+     * @return array<int, string>
+     */
+    private function guessedResources(string $model): array
+    {
+        try {
+            return method_exists($model, 'guessResourceName') ? array_values(array_filter($model::guessResourceName(), 'is_string')) : [];
+        } catch (Throwable) {
+            return [];
+        }
     }
 
     private function returnExpression(ReflectionFunctionAbstract $action): ?Node\Expr

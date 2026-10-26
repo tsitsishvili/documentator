@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace Tsitsishvili\Documentator\OpenApi;
 
+use Closure;
+use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Resources\Json\JsonResource;
 use Illuminate\Http\Resources\Json\ResourceCollection;
@@ -14,7 +16,9 @@ use PhpParser\Node\Expr\Cast;
 use PhpParser\Node\Scalar;
 use PhpParser\NodeFinder;
 use ReflectionClass;
+use ReflectionFunction;
 use ReflectionMethod;
+use ReflectionNamedType;
 use Throwable;
 use Tsitsishvili\Documentator\Attributes\UsesModel;
 use Tsitsishvili\Documentator\Extraction\Support\SourceAnalyzer;
@@ -117,7 +121,61 @@ final class ResourceSchemaExtractor
         }
         $this->currentCasts = $previousCasts;
 
+        $properties = $this->serializedProperties($modelClass, $properties);
+
         return $properties === [] ? self::OBJECT : ['type' => 'object', 'properties' => $properties];
+    }
+
+    /**
+     * Narrow a model's properties to what toArray() serializes: appended
+     * accessors are added, then hidden fields dropped and a visible list
+     * applied. The getters already merge Laravel 13's #[Hidden]/#[Visible]/
+     * #[Appends] attributes.
+     *
+     * @param  array<string, array<string, mixed>>  $properties
+     * @return array<string, array<string, mixed>>
+     */
+    private function serializedProperties(string $modelClass, array $properties): array
+    {
+        try {
+            $model = new $modelClass;
+        } catch (Throwable) {
+            return $properties;
+        }
+
+        foreach ($model->getAppends() as $name) {
+            $properties[$name] ??= $this->accessorSchema($model, $name) ?? $this->hintFromName($name);
+        }
+
+        $properties = array_diff_key($properties, array_flip($model->getHidden()));
+
+        return $model->getVisible() === [] ? $properties : array_intersect_key($properties, array_flip($model->getVisible()));
+    }
+
+    /**
+     * The schema an appended accessor's declared return type implies: a legacy
+     * get{Name}Attribute() method, or the `get` closure of an Attribute accessor.
+     *
+     * @return array<string, mixed>|null
+     */
+    private function accessorSchema(Model $model, string $name): ?array
+    {
+        try {
+            if (method_exists($model, $legacy = 'get'.Str::studly($name).'Attribute')) {
+                $type = (new ReflectionMethod($model, $legacy))->getReturnType();
+            } elseif (method_exists($model, $method = Str::camel($name))
+                && (string) (new ReflectionMethod($model, $method))->getReturnType() === Attribute::class) {
+                // Building the Attribute only defines its closures; nothing is read from the model.
+                $get = (new ReflectionMethod($model, $method))->invoke($model)->get;
+                $type = $get instanceof Closure ? (new ReflectionFunction($get))->getReturnType() : null;
+            }
+        } catch (Throwable) {
+            return null;
+        }
+
+        return isset($type) && $type instanceof ReflectionNamedType && $type->getName() !== 'mixed'
+            ? $this->docType((string) $type)
+            : null;
     }
 
     public function isJsonApiResource(string $resourceClass): bool
