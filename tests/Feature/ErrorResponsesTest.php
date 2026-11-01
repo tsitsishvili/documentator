@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Foundation\Http\FormRequest;
+use Illuminate\Routing\Attributes\Controllers\Authorize;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Route;
 use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
@@ -61,6 +62,9 @@ class ErrorThingController
     public function show(ErrorThing $errorThing): void {}
 
     public function ping(): void {}
+
+    #[Authorize('view', 'errorThing')]
+    public function authorized(ErrorThing $errorThing): void {}
 
     #[Response(422, description: 'Custom validation shape')]
     public function declared(StoreErrorThingRequest $request): void {}
@@ -128,6 +132,24 @@ it('infers a 401 when the endpoint requires authentication', function () {
     expect(errorResponses('/api/private', 'get'))->toHaveKey('401')
         ->and(errorResponses('/api/public', 'get'))->not->toHaveKey('401');
 });
+
+it('infers a 403 from authorization middleware', function () {
+    Route::get('api/can/{errorThing}', [ErrorThingController::class, 'show'])->middleware('can:view,errorThing');
+    Route::get('api/route-can/{errorThing}', [ErrorThingController::class, 'show'])->can('view', 'errorThing');
+    Route::get('api/abilities', [ErrorThingController::class, 'ping'])->middleware('abilities:orders:read');
+    Route::get('api/scopes', [ErrorThingController::class, 'ping'])->middleware('scope:orders');
+
+    expect(errorResponses('/api/can/{errorThing}', 'get'))->toHaveKey('403')
+        ->and(errorResponses('/api/route-can/{errorThing}', 'get'))->toHaveKey('403')
+        ->and(errorResponses('/api/abilities', 'get'))->toHaveKey('403')
+        ->and(errorResponses('/api/scopes', 'get'))->toHaveKey('403');
+});
+
+it('infers a 403 from a controller #[Authorize] attribute', function () {
+    Route::get('api/authorized/{errorThing}', [ErrorThingController::class, 'authorized']);
+
+    expect(errorResponses('/api/authorized/{errorThing}', 'get'))->toHaveKey('403');
+})->skip(! class_exists(Authorize::class), 'Controller #[Authorize] requires Laravel 13.');
 
 it('infers a 404 when the route binds a model', function () {
     Route::get('api/error-things/{errorThing}', [ErrorThingController::class, 'show']);

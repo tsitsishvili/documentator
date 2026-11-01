@@ -4,9 +4,11 @@ declare(strict_types=1);
 
 namespace Tsitsishvili\Documentator\Extraction\Strategies;
 
+use Illuminate\Auth\Middleware\Authorize as AuthorizeMiddleware;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Routing\Route;
+use Illuminate\Support\Str;
 use PhpParser\Node;
 use PhpParser\NodeFinder;
 use ReflectionFunctionAbstract;
@@ -27,7 +29,8 @@ use Tsitsishvili\Documentator\Extraction\Support\SourceAnalyzer;
  *
  *   401  the endpoint requires authentication (auth middleware / #[Authenticated])
  *   403  a type-hinted FormRequest overrides authorize() with a body that can
- *        actually deny (a trivial `return true` override is not a real gate)
+ *        actually deny (a trivial `return true` override is not a real gate),
+ *        or authorization middleware guards the route
  *   404  the route binds a model (implicit route-model binding)
  *   422  a type-hinted FormRequest or inline validation validates input
  *
@@ -52,6 +55,10 @@ final class ExtractErrorResponses implements ExtractionStrategy
 
         if ($endpoint->authenticated || ($action !== null && $this->hasAuthAttribute($action))) {
             $endpoint->responses[401] ??= $this->messageResponse(401, 'Unauthenticated');
+        }
+
+        if ($this->authorizesViaMiddleware($route)) {
+            $endpoint->responses[403] ??= $this->messageResponse(403, 'Forbidden');
         }
 
         if ($action === null) {
@@ -93,6 +100,23 @@ final class ExtractErrorResponses implements ExtractionStrategy
 
         return $action instanceof ReflectionMethod
             && $action->getDeclaringClass()->getAttributes(Authenticated::class) !== [];
+    }
+
+    /**
+     * Whether route middleware can deny the request: Laravel's `can` (which
+     * ->can() and #[Authorize] compile to) or Sanctum/Passport token checks.
+     */
+    private function authorizesViaMiddleware(Route $route): bool
+    {
+        foreach ($route->gatherMiddleware() as $middleware) {
+            if (is_string($middleware) && Str::startsWith($middleware, [
+                'can:', AuthorizeMiddleware::class.':', 'abilities:', 'ability:', 'scopes:', 'scope:',
+            ])) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private function findFormRequest(ReflectionFunctionAbstract $action): ?string
