@@ -451,6 +451,10 @@ final class InlineValidationRulesExtractor
             return $rules;
         }
 
+        if ($expr instanceof Node\Scalar\String_) {
+            return explode('|', $expr->value);
+        }
+
         return $expr instanceof Node\Expr ? $this->ruleStrings($expr) : [];
     }
 

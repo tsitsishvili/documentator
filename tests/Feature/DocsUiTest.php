@@ -37,9 +37,12 @@ it('uses memory auth storage by default', function () {
 });
 
 it('serves the built-in CSS and JS assets', function () {
-    $this->get('/docs/assets/app.css')
+    $css = $this->get('/docs/assets/app.css')
         ->assertOk()
         ->assertHeader('Content-Type', 'text/css; charset=utf-8');
+
+    // The "web" group sets session cookies here, so shared caches must not store it.
+    expect($css->headers->get('Cache-Control'))->toContain('private')->not->toContain('public');
 
     $this->get('/docs/assets/app.js')
         ->assertOk()

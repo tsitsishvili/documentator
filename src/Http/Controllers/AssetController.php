@@ -29,7 +29,8 @@ final class AssetController
 
         return new Response((string) file_get_contents($path), 200, [
             'Content-Type' => self::ASSETS[$asset],
-            'Cache-Control' => 'public, max-age=3600',
+            // private: the docs middleware ("web") sets session cookies on this response.
+            'Cache-Control' => 'private, max-age=3600',
         ]);
     }
 }

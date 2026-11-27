@@ -203,9 +203,10 @@ function widgetSchema(string $uri): array
 function widgetSchemaProps(string $uri): array
 {
     $schema = widgetSchema($uri);
+    $schema = app(Documentator::class)->toOpenApi()['components']['schemas'][basename($schema['$ref'] ?? '')] ?? $schema;
 
-    return app(Documentator::class)->toOpenApi()['components']['schemas'][basename($schema['$ref'] ?? '')]['properties']
-        ?? $schema['properties'];
+    // A single resource is documented inside Laravel's "data" wrapper.
+    return $schema['properties']['data']['properties'];
 }
 
 $toResourceMissing = ! method_exists(Model::class, 'toResource');
@@ -264,7 +265,7 @@ it('leaves an unresolvable or relationship-changed receiver as a generic respons
 it('types resource fields from the model casts', function () {
     Route::get('api/widgets/{widget}', [WidgetShowController::class, 'show']);
 
-    $props = widgetSchema('/api/widgets/{widget}')['properties'];
+    $props = widgetSchemaProps('/api/widgets/{widget}');
 
     expect($props['price']['type'])->toBe('number')
         ->and($props['active']['type'])->toBe('boolean')
@@ -277,7 +278,7 @@ it('types resource fields from the model casts', function () {
 it('marks whenLoaded fields optional and follows the nested resource', function () {
     Route::get('api/widgets/{widget}', [WidgetShowController::class, 'show']);
 
-    $schema = widgetSchema('/api/widgets/{widget}');
+    $schema = widgetSchema('/api/widgets/{widget}')['properties']['data'];
     $tagList = $schema['properties']['tag_list'];
 
     expect($tagList)->not->toHaveKey('nullable')

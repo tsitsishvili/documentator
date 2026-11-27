@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Single resources are documented inside Laravel's `data` wrapper.** A
+  returned `JsonResource` (by return type, return statement, Laravel Action, or
+  `#[Response(resource: X)]`) was documented as its bare `toArray()` fields,
+  while Laravel sends `{"data": {...}}`. The schema now follows the resource's
+  `$wrap`: wrapped by default, bare after `JsonResource::withoutWrapping()` or
+  when `toArray()` already has that key. **Generated specs and TypeScript
+  clients change for these endpoints** — re-run `documentator:export` and
+  regenerate clients.
+- **Returns inside nested closures.** A `return` in a callback (`->map()`,
+  `->when()`, `DB::transaction()`) is no longer read as the action's or the
+  Resource's own return. Such callbacks used to hide the real Resource, drop
+  `toArray()` fields, or add a bogus `oneOf` response branch.
+- **False drift in `documentator:check --against`.** The check now compares the
+  same document `documentator:export` writes, so recorded response examples and
+  an empty `security` config no longer report drift on a fresh export.
+- **Validation rule accuracy.** Array rules are no longer split on `|` (a
+  `regex:/a|b/` keeps its pattern); an explicit `string`/`uuid`/`ulid` wins over
+  the `exists:table,id` integer guess; file `min`/`max` are not emitted as
+  string lengths; `date_format:Y-m-d` is a `date` and time-only formats carry no
+  format; `list` is an array; `accepted`/`declined` are booleans; `ipv4`/`ipv6`
+  set their format; `Rule::in()` values containing commas stay whole; fluent
+  `Rule::numeric()` / `Rule::date()` chains are understood.
+- **Recorded examples under parallel tests.** `recordAsDocumentationExample()`
+  updates the examples file under a lock, so parallel test processes no longer
+  drop each other's examples. An unreadable examples file now fails with a
+  clear error instead of being silently replaced.
+- **UI asset caching.** Assets are served with `Cache-Control: private`, since
+  the `web` middleware group attaches session cookies to those responses.
+
 ## [2.3.0] - 2026-11-01
 
 ### Added

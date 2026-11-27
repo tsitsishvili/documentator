@@ -137,7 +137,7 @@ it('emits operation, header, media type, response header, and schema name attrib
         ->and($operation['requestBody']['content'])->toHaveKey('application/vnd.api+json')
         ->and($operation['responses']['201']['headers']['X-Request-Id']['schema']['type'])->toBe('string')
         ->and($operation['responses']['201']['content']['application/json']['schema'])->toBe(['$ref' => '#/components/schemas/PublicInvoice'])
-        ->and($spec['components']['schemas']['PublicInvoice']['properties']['email']['type'])->toBe('string')
+        ->and($spec['components']['schemas']['PublicInvoice']['properties']['data']['properties']['email']['type'])->toBe('string')
         ->and($parameters['include']['schema'])->toBe(['type' => 'array', 'items' => ['type' => 'string']])
         ->and($operation['responses']['202']['content']['application/json']['schema']['properties']['id']['type'])->toBe('integer')
         ->and($operation['responses']['202']['content']['application/json']['schema']['properties']['status']['type'])->toBe('string')

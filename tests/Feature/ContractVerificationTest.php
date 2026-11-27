@@ -267,3 +267,18 @@ it('reports invalid JSON before attempting schema validation', function () {
 
     expect($errors[0])->toContain('response body is not valid JSON');
 });
+
+it('refuses to overwrite a recorded examples file it cannot read', function () {
+    $path = sys_get_temp_dir().'/documentator-corrupt-examples-'.uniqid().'.json';
+    file_put_contents($path, '<<<<<<< HEAD');
+    config(['documentator.examples.path' => $path]);
+
+    Route::get('api/contracts/{contract}', [ContractVerificationController::class, 'recordable']);
+
+    expect(fn () => $this->getJson('/api/contracts/42')->recordAsDocumentationExample())
+        ->toThrow(RuntimeException::class, 'not valid JSON');
+
+    expect(file_get_contents($path))->toBe('<<<<<<< HEAD');
+
+    @unlink($path);
+});

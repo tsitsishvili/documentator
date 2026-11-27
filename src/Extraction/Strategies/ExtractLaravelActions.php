@@ -122,7 +122,7 @@ final class ExtractLaravelActions implements ExtractionStrategy
                 status: $status,
                 description: $status === 201 ? 'Created' : 'Successful response',
                 resource: $returnClass,
-                schema: $this->schemas->extract($returnClass),
+                schema: $this->schemas->response($returnClass),
                 mediaType: $jsonApi ? 'application/vnd.api+json' : null,
             );
         } elseif (is_subclass_of($returnClass, Model::class)) {

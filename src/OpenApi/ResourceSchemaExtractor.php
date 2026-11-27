@@ -97,6 +97,26 @@ final class ResourceSchemaExtractor
     }
 
     /**
+     * The body Laravel sends for a single resource: its fields under the
+     * resource's `$wrap` key ("data" by default). Left bare when wrapping is off
+     * (`JsonResource::withoutWrapping()`) or the fields already hold that key,
+     * which is the same rule Laravel's ResourceResponse applies.
+     *
+     * @return array<string, mixed>
+     */
+    public function response(string $resourceClass): array
+    {
+        $schema = $this->extract($resourceClass);
+        $wrap = is_subclass_of($resourceClass, JsonResource::class) ? $resourceClass::$wrap : null;
+
+        if (! is_string($wrap) || $wrap === '' || isset($schema['properties'][$wrap])) {
+            return $schema;
+        }
+
+        return ['type' => 'object', 'properties' => [$wrap => $schema]];
+    }
+
+    /**
      * Recover a schema from an Eloquent model directly (for controllers that
      * return a model rather than a Resource): its `@property` docblock gives the
      * column list (typically from laravel-ide-helper) and `$casts` refine the

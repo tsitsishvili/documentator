@@ -7,7 +7,9 @@ namespace Tsitsishvili\Documentator\Extraction\Support;
 use PhpParser\Node;
 use PhpParser\NodeFinder;
 use PhpParser\NodeTraverser;
+use PhpParser\NodeVisitor;
 use PhpParser\NodeVisitor\NameResolver;
+use PhpParser\NodeVisitorAbstract;
 use PhpParser\Parser;
 use PhpParser\ParserFactory;
 use ReflectionFunction;
@@ -121,13 +123,44 @@ final class SourceAnalyzer
             return $functionNode->expr;
         }
 
-        $return = (new NodeFinder)->findFirst(
-            $functionNode,
-            fn (Node $node) => $node instanceof Node\Stmt\Return_ && $node->expr instanceof Node\Expr,
-        );
+        foreach ($this->returnStatements($functionNode) as $return) {
+            if ($return->expr instanceof Node\Expr) {
+                return $return->expr;
+            }
+        }
 
-        return $return instanceof Node\Stmt\Return_ && $return->expr instanceof Node\Expr
-            ? $return->expr
-            : null;
+        return null;
+    }
+
+    /**
+     * The function's own return statements, in source order. Returns inside
+     * nested closures and classes belong to those, so they are skipped.
+     *
+     * @return array<int, Node\Stmt\Return_>
+     */
+    public function returnStatements(Node\FunctionLike $function): array
+    {
+        $visitor = new class extends NodeVisitorAbstract
+        {
+            /** @var array<int, Node\Stmt\Return_> */
+            public array $returns = [];
+
+            public function enterNode(Node $node): ?int
+            {
+                if ($node instanceof Node\FunctionLike || $node instanceof Node\Stmt\ClassLike) {
+                    return NodeVisitor::DONT_TRAVERSE_CHILDREN;
+                }
+
+                if ($node instanceof Node\Stmt\Return_) {
+                    $this->returns[] = $node;
+                }
+
+                return null;
+            }
+        };
+
+        (new NodeTraverser($visitor))->traverse($function->getStmts() ?? []);
+
+        return $visitor->returns;
     }
 }

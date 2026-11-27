@@ -176,3 +176,30 @@ it('suggests suspicious routes that may be hidden', function () {
     expect($exit)->toBe(0)
         ->and($payload['hidden_suggestions'][0]['endpoint'])->toBe('GET /api/internal/reindex');
 });
+
+it('does not report drift for a freshly exported spec with recorded examples', function () {
+    $examples = sys_get_temp_dir().'/documentator-check-examples-'.uniqid().'.json';
+    $path = sys_get_temp_dir().'/documentator-check-'.uniqid().'.json';
+    config(['documentator.examples.path' => $examples]);
+
+    Route::get('api/checked', fn () => response()->json(['ok' => true]));
+
+    $this->getJson('api/checked')->recordAsDocumentationExample();
+    $this->artisan('documentator:export', ['path' => $path])->assertExitCode(0);
+    $this->artisan('documentator:check', ['--against' => $path])->assertExitCode(0);
+
+    @unlink($examples);
+    @unlink($path);
+});
+
+it('does not report drift when no security schemes are configured', function () {
+    $path = sys_get_temp_dir().'/documentator-check-'.uniqid().'.json';
+    config(['documentator.security' => []]);
+
+    Route::get('api/checked', [CheckedController::class, 'index']);
+
+    $this->artisan('documentator:export', ['path' => $path])->assertExitCode(0);
+    $this->artisan('documentator:check', ['--against' => $path])->assertExitCode(0);
+
+    @unlink($path);
+});
