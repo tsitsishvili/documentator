@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.4.0] - 2026-11-27
+
 ### Fixed
 
 - **Single resources are documented inside Laravel's `data` wrapper.** A
@@ -541,7 +543,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (with a Scalar driver), Postman export, and the `documentator:generate`,
   `documentator:export` and `documentator:postman` commands.
 
-[Unreleased]: https://github.com/tsitsishvili/documentator/compare/v2.3.0...HEAD
+[Unreleased]: https://github.com/tsitsishvili/documentator/compare/v2.4.0...HEAD
+[2.4.0]: https://github.com/tsitsishvili/documentator/compare/v2.3.0...v2.4.0
 [2.3.0]: https://github.com/tsitsishvili/documentator/compare/v2.2.1...v2.3.0
 [2.2.1]: https://github.com/tsitsishvili/documentator/compare/v2.2.0...v2.2.1
 [2.2.0]: https://github.com/tsitsishvili/documentator/compare/v2.1.0...v2.2.0
