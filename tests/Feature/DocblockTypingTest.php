@@ -46,7 +46,7 @@ class ArticleShowController
 it('types fields from the model @property docblock when not cast', function () {
     Route::get('api/articles/{article}', [ArticleShowController::class, 'show']);
 
-    $props = app(Documentator::class)->toOpenApi()['paths']['/api/articles/{article}']['get']['responses']['200']['content']['application/json']['schema']['properties'];
+    $props = app(Documentator::class)->toOpenApi()['paths']['/api/articles/{article}']['get']['responses']['200']['content']['application/json']['schema']['properties']['data']['properties'];
 
     expect($props['title']['type'])->toBe('string')
         ->and($props['views']['type'])->toBe('integer')

@@ -146,7 +146,9 @@ Available attributes: `Summary`, `Description`, `OperationId`, `Group`,
 `SchemaName`.
 `Group`, `Authenticated`, `Hidden` and `Deprecated` may also be placed on the
 controller class to set a default for all its methods (`#[Deprecated]` also
-honours PHP 8.4's native `#[\Deprecated]`). `#[Response(resource: X, paginated: true)]` (or
+honours PHP 8.4's native `#[\Deprecated]`). A single resource is documented
+inside its `$wrap` key (`{ data: {...} }` by default, bare after
+`JsonResource::withoutWrapping()`), as Laravel sends it. `#[Response(resource: X, paginated: true)]` (or
 `collection: true`) wraps a resource in the paginator / `{ data: [...] }`
 envelope; add `paginationLinks: false` for a custom collection that drops
 Laravel's `links` blocks. `#[Response(type: 'array{id: int}')]` and parameter

@@ -105,8 +105,8 @@ final class ExtractInlineResponses implements ExtractionStrategy
             return $response === null ? [] : [$response];
         }
 
-        foreach ((new NodeFinder)->find($functionNode, fn (Node $node) => $node instanceof Node\Stmt\Return_) as $return) {
-            if (! $return instanceof Node\Stmt\Return_ || ! $return->expr instanceof Node\Expr) {
+        foreach ($this->source->returnStatements($functionNode) as $return) {
+            if (! $return->expr instanceof Node\Expr) {
                 continue;
             }
 

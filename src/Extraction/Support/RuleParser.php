@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace Tsitsishvili\Documentator\Extraction\Support;
 
 use Illuminate\Validation\ConditionalRules;
+use Illuminate\Validation\Rules\Date;
+use Illuminate\Validation\Rules\Numeric;
 use Throwable;
 use Tsitsishvili\Documentator\Contracts\ValidationRuleTransformer;
 use Tsitsishvili\Documentator\Data\ParameterData;
@@ -198,7 +200,8 @@ final class RuleParser
             if ($max !== null) {
                 $schema['maximum'] = $max + 0;
             }
-        } elseif ($type === 'string') {
+        } elseif ($type === 'string' && $format !== 'binary') {
+            // A file's min/max are kilobytes, not a string length.
             if ($min !== null) {
                 $schema['minLength'] = (int) $min;
             }
@@ -222,10 +225,11 @@ final class RuleParser
     }
 
     /**
-     * Normalise a rule definition into a list of raw rule strings. A `|`-delimited
-     * string is split; rule objects (e.g. `Rule::in()`, `Rule::enum()`) are kept
-     * by casting to their string form (`in:"a","b"`) since the FormRequest is
-     * instantiated before rules() is read; closures and anything else are dropped.
+     * Normalise a rule definition into a list of raw rule strings, splitting on
+     * `|` exactly where Laravel does: a string ruleset and the fluent Date/Numeric
+     * rule objects. Strings inside an array are kept whole (so `regex:/a|b/`
+     * survives). Other rule objects (e.g. `Rule::in()`) are kept by casting to
+     * their string form (`in:"a","b"`); closures and anything else are dropped.
      *
      * @return array<int, string>
      */
@@ -236,7 +240,9 @@ final class RuleParser
         $rules = [];
         foreach ($raw as $rule) {
             if (is_string($rule)) {
-                array_push($rules, ...explode('|', $rule));
+                $rules[] = $rule;
+            } elseif ($rule instanceof Date || $rule instanceof Numeric) {
+                array_push($rules, ...explode('|', (string) $rule));
             } elseif ($rule instanceof ConditionalRules) {
                 array_push($rules, ...self::ruleList($rule->rules()));
                 array_push($rules, ...self::ruleList($rule->defaultRules()));
@@ -282,21 +288,30 @@ final class RuleParser
      */
     private static function typeFor(array $rules): string
     {
-        if (($exists = self::arg($rules, 'exists')) !== null) {
-            $column = strtolower(explode(',', $exists)[1] ?? '');
-
-            if ($column === 'id' || $column === '' || str_ends_with($column, '_id')) {
-                return 'integer';
-            }
-        }
-
         return match (true) {
             self::has($rules, 'integer'), self::has($rules, 'digits'), self::has($rules, 'digits_between') => 'integer',
             self::has($rules, 'numeric'), self::has($rules, 'decimal') => 'number',
-            self::has($rules, 'boolean'), self::has($rules, 'bool') => 'boolean',
-            self::has($rules, 'array') => 'array',
+            self::has($rules, 'boolean'), self::has($rules, 'bool'), self::has($rules, 'accepted'), self::has($rules, 'declined') => 'boolean',
+            self::has($rules, 'array'), self::has($rules, 'list') => 'array',
+            self::has($rules, 'string'), self::has($rules, 'uuid'), self::has($rules, 'ulid') => 'string',
+            // No explicit type: an id-shaped exists: column is most likely an integer key.
+            self::existsOnIdColumn($rules) => 'integer',
             default => 'string',
         };
+    }
+
+    /**
+     * @param  array<int, string>  $rules
+     */
+    private static function existsOnIdColumn(array $rules): bool
+    {
+        if (($exists = self::arg($rules, 'exists')) === null) {
+            return false;
+        }
+
+        $column = strtolower(explode(',', $exists)[1] ?? '');
+
+        return $column === 'id' || $column === '' || str_ends_with($column, '_id');
     }
 
     /**
@@ -352,8 +367,23 @@ final class RuleParser
             self::has($rules, 'email') => 'email',
             self::has($rules, 'uuid') => 'uuid',
             self::has($rules, 'url') => 'uri',
-            self::has($rules, 'ip') => 'ipv4',
-            self::has($rules, 'date'), self::has($rules, 'date_format') => 'date-time',
+            self::has($rules, 'ip'), self::has($rules, 'ipv4') => 'ipv4',
+            self::has($rules, 'ipv6') => 'ipv6',
+            self::has($rules, 'date') => 'date-time',
+            default => self::dateFormat(self::arg($rules, 'date_format')),
+        };
+    }
+
+    /**
+     * `date_format:Y-m-d` is a date; a format with both a year and an hour is a
+     * date-time. Anything else (e.g. `H:i`) has no JSON Schema format.
+     */
+    private static function dateFormat(?string $format): ?string
+    {
+        return match (true) {
+            $format === null => null,
+            $format === 'Y-m-d' => 'date',
+            str_contains($format, 'Y') && str_contains($format, 'H') => 'date-time',
             default => null,
         };
     }
@@ -369,10 +399,11 @@ final class RuleParser
             return null;
         }
 
-        return array_map(
-            fn (string $value) => trim($value, "\"'"),
-            array_filter(explode(',', $in), fn ($v) => $v !== ''),
-        );
+        // Rule::in() quotes its values, so a value may itself contain a comma.
+        return array_values(array_map(
+            fn (?string $value) => trim((string) $value, "\"'"),
+            array_filter(str_getcsv($in, ',', '"', ''), fn ($v) => $v !== null && $v !== ''),
+        ));
     }
 
     /**

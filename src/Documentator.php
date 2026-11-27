@@ -76,11 +76,12 @@ final class Documentator
     }
 
     /**
+     * @param  array<int, EndpointData>|null  $endpoints  Already-extracted endpoints, to avoid extracting twice.
      * @return array<string, mixed>
      */
-    public function toOpenApi(?string $version = null, bool $omitUnsupported = false): array
+    public function toOpenApi(?string $version = null, bool $omitUnsupported = false, ?array $endpoints = null): array
     {
-        $spec = $this->generator->generate($this->endpoints());
+        $spec = $this->generator->generate($endpoints ?? $this->endpoints());
         $spec = $this->examples->apply($spec);
         $version ??= (string) config('documentator.openapi.version', '3.2');
 

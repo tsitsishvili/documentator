@@ -2,7 +2,7 @@ name: tests
 
 on:
   push:
-    branches: [main, dev]
+    branches: [main, 'v*.x']
     tags: ['v*']
   pull_request:
 
@@ -70,7 +70,7 @@ jobs:
 
   lint:
     runs-on: ubuntu-latest
-    name: Pint
+    name: Pint and PHPStan
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
@@ -85,6 +85,9 @@ jobs:
 
       - name: Check code style
         run: vendor/bin/pint --test
+
+      - name: Static analysis
+        run: composer analyse
 
   browser:
     runs-on: ubuntu-latest

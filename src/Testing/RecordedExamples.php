@@ -51,16 +51,13 @@ final class RecordedExamples
             throw new RuntimeException(strtoupper($method)." {$uri} returned an undocumented media type");
         }
 
-        $value = $this->value($content, $contentType);
         $key = strtoupper($method).' '.$match['path'];
-        $examples = $this->read();
-        $exampleName = $this->name($name);
-        $examples[$key][$statusKey][$mediaType][$exampleName] = array_filter([
+        $example = array_filter([
             'summary' => $summary ?? ($name === 'default' ? null : $name),
-            'value' => $this->redact($value),
+            'value' => $this->redact($this->value($content, $contentType)),
         ], fn (mixed $item): bool => $item !== null);
 
-        $this->write($examples);
+        $this->store($key, $statusKey, $mediaType, $this->name($name), $example);
     }
 
     /**
@@ -220,7 +217,8 @@ final class RecordedExamples
         }
 
         try {
-            $decoded = json_decode(File::get($path), true, flags: JSON_THROW_ON_ERROR);
+            // Shared lock: never read a file store() is halfway through writing.
+            $decoded = json_decode(File::get($path, true), true, flags: JSON_THROW_ON_ERROR);
 
             return is_array($decoded) ? $decoded : [];
         } catch (JsonException) {
@@ -229,18 +227,47 @@ final class RecordedExamples
     }
 
     /**
-     * @param  array<string, mixed>  $examples
+     * Add one example to the file. The read-modify-write happens under an
+     * exclusive lock so parallel test processes don't drop each other's examples.
+     *
+     * @param  array<string, mixed>  $example
      */
-    private function write(array $examples): void
+    private function store(string $key, string|int $status, string $mediaType, string $name, array $example): void
     {
         $path = $this->path();
         File::ensureDirectoryExists(dirname($path));
-        $json = json_encode(
-            $examples,
-            JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR,
-        ).PHP_EOL;
-        if (File::put($path, $json, true) === false) {
+        $handle = fopen($path, 'c+');
+
+        if ($handle === false || ! flock($handle, LOCK_EX)) {
             throw new RuntimeException("Could not write recorded examples to {$path}");
+        }
+
+        try {
+            $contents = (string) stream_get_contents($handle);
+            $examples = trim($contents) === '' ? [] : json_decode($contents, true, flags: JSON_THROW_ON_ERROR);
+
+            if (! is_array($examples)) {
+                throw new JsonException('not a JSON object');
+            }
+
+            $examples[$key][$status][$mediaType][$name] = $example;
+            $json = json_encode(
+                $examples,
+                JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR,
+            ).PHP_EOL;
+
+            ftruncate($handle, 0);
+            rewind($handle);
+            fwrite($handle, $json);
+        } catch (JsonException $exception) {
+            // Refuse to replace a file we can't read: it holds earlier examples.
+            throw new RuntimeException(
+                "Recorded examples file {$path} is not valid JSON ({$exception->getMessage()}). Fix or delete it.",
+                previous: $exception,
+            );
+        } finally {
+            flock($handle, LOCK_UN);
+            fclose($handle);
         }
     }
 

@@ -54,7 +54,7 @@ it('infers FormRequests, model bindings, return types, and attributes from closu
     $pathParam = collect($operation['parameters'])->firstWhere('name', 'widget');
     $bodySchema = $operation['requestBody']['content']['application/json']['schema'];
     $responseSchema = $operation['responses']['202']['content']['application/json']['schema'];
-    $responseProps = $spec['components']['schemas']['ClosureRouteWidgetResource']['properties'];
+    $responseProps = $spec['components']['schemas']['ClosureRouteWidgetResource']['properties']['data']['properties'];
 
     expect($operation['summary'])->toBe('Store closure widget')
         ->and($operation['description'])->toBe('Creates through an anonymous route action.')

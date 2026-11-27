@@ -287,7 +287,7 @@ final class ExtractAttributes implements ExtractionStrategy
         return match (true) {
             $response->paginated => PaginationSchema::paginated($item, $this->paginatedCollection($action), $response->paginationLinks),
             $response->collection => PaginationSchema::collection($item),
-            default => $item,
+            default => $this->schemas->response($response->resource),
         };
     }
 

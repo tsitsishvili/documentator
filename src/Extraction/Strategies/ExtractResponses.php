@@ -116,7 +116,7 @@ final class ExtractResponses implements ExtractionStrategy
                 status: $status,
                 description: $this->describe($status),
                 resource: $class,
-                schema: $this->schemas->extract($class),
+                schema: $this->schemas->response($class),
                 mediaType: $jsonApi ? 'application/vnd.api+json' : null,
                 schemaName: $this->schemaName($class),
             );

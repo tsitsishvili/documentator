@@ -44,7 +44,7 @@ class OrderShowController
 it('extracts a real response schema from an API Resource, following nesting', function () {
     Route::get('api/orders/{order}', [OrderShowController::class, 'show']);
 
-    $schema = app(Documentator::class)->toOpenApi()['paths']['/api/orders/{order}']['get']['responses']['200']['content']['application/json']['schema'];
+    $schema = app(Documentator::class)->toOpenApi()['paths']['/api/orders/{order}']['get']['responses']['200']['content']['application/json']['schema']['properties']['data'];
 
     expect($schema['type'])->toBe('object')
         // Types inferred from casts / literals.

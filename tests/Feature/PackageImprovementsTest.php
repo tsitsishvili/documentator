@@ -218,7 +218,7 @@ it('moves repeated response schemas into reusable components', function () {
     $schema = $spec['paths']['/api/improvements/first']['get']['responses']['200']['content']['application/json']['schema'];
 
     expect($schema)->toBe(['$ref' => '#/components/schemas/ImprovementThingResource'])
-        ->and($spec['components']['schemas']['ImprovementThingResource']['properties']['name']['type'])->toBe('string');
+        ->and($spec['components']['schemas']['ImprovementThingResource']['properties']['data']['properties']['name']['type'])->toBe('string');
 });
 
 it('reads merged and conditional resource fields', function () {

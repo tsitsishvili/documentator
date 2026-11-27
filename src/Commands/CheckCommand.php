@@ -10,9 +10,7 @@ use Illuminate\Support\Str;
 use InvalidArgumentException;
 use Tsitsishvili\Documentator\Data\EndpointData;
 use Tsitsishvili\Documentator\Documentator;
-use Tsitsishvili\Documentator\OpenApi\OpenApiCompatibility;
 use Tsitsishvili\Documentator\OpenApi\OpenApiCompatibilityException;
-use Tsitsishvili\Documentator\OpenApi\OpenApiGenerator;
 use Tsitsishvili\Documentator\OpenApi\OpenApiMethods;
 use Tsitsishvili\Documentator\Support\OpenApiDiff;
 use Tsitsishvili\Documentator\Support\OpenApiValidator;
@@ -36,11 +34,8 @@ final class CheckCommand extends Command
 
     protected $description = 'Audit the generated API documentation for gaps and drift';
 
-    public function handle(
-        Documentator $documentator,
-        OpenApiGenerator $generator,
-        OpenApiCompatibility $compatibility,
-    ): int {
+    public function handle(Documentator $documentator): int
+    {
         if (! in_array($this->failOn(), ['any', 'breaking'], true)) {
             $this->error('--fail-on must be either "any" or "breaking".');
 
@@ -48,13 +43,14 @@ final class CheckCommand extends Command
         }
 
         $endpoints = $documentator->endpoints();
-        $spec = $generator->generate($endpoints);
 
         try {
-            $spec = $compatibility->target(
-                $spec,
-                $this->option('openapi') ?: (string) config('documentator.openapi.version', '3.2'),
+            // The same document documentator:export writes, recorded examples
+            // included, so a fresh export never reads as drift.
+            $spec = $documentator->toOpenApi(
+                $this->option('openapi') ?: null,
                 (bool) $this->option('omit-unsupported'),
+                $endpoints,
             );
         } catch (InvalidArgumentException|OpenApiCompatibilityException $exception) {
             if ($this->option('json')) {
@@ -310,7 +306,9 @@ final class CheckCommand extends Command
 
         $expectedSpec = json_decode(File::get($path), true);
         $expected = json_encode($expectedSpec);
-        $actual = json_encode($actualSpec);
+        // Round-trip so empty objects (e.g. no security schemes) compare the
+        // same way the decoded file does.
+        $actual = json_encode(json_decode((string) json_encode($actualSpec), true));
 
         $drifted = $expected !== $actual;
         $changes = $drifted
